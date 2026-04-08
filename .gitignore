@@ -21,8 +21,18 @@ venv/
 # Environment files
 .env
 
-# Data and model outputs (keep folders with .gitkeep)
-data/raw/*
+# Data and model outputs (keep scaffold + helper files tracked)
+data/raw/openpose_json/**/*.json
+data/raw/openpose_json/**/take_*/
+data/raw/rgb_video/**/*.mp4
+data/raw/rgb_video/**/*.mov
+data/raw/rgb_video/**/*.avi
+data/raw/rgb_video/**/*.mkv
+data/raw/rgb_video/**/take_*/
+!data/raw/README.md
+!data/raw/manifest.csv
+!data/raw/openpose_json/README.md
+!data/raw/rgb_video/README.md
 !data/raw/**/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
