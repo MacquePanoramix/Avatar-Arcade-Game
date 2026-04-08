@@ -1,0 +1,22 @@
+project_root: "."
+
+configs_dir: "configs"
+data_dir: "data"
+raw_data_dir: "data/raw"
+processed_data_dir: "data/processed"
+splits_dir: "data/splits"
+debug_samples_dir: "data/debug_samples"
+
+kinect_raw_dir: "data/raw/kinect_body"
+openpose_raw_dir: "data/raw/openpose_json"
+rgb_video_dir: "data/raw/rgb_video"
+
+models_dir: "models"
+checkpoints_dir: "models/checkpoints"
+exported_models_dir: "models/exported"
+reports_dir: "models/reports"
+
+logs_dir: "logs"
+capture_logs_dir: "logs/capture"
+training_logs_dir: "logs/training"
+inference_logs_dir: "logs/inference"

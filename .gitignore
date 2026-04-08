@@ -1,0 +1,43 @@
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE/editor
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+
+# Environment files
+.env
+
+# Data and model outputs (keep folders with .gitkeep)
+data/raw/*
+!data/raw/**/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/splits/*
+!data/splits/.gitkeep
+data/debug_samples/*
+!data/debug_samples/.gitkeep
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+logs/*
+!logs/**/
+!logs/**/.gitkeep
+
+# Optional generated outputs
+models/exported/*.h5
+models/exported/*.keras
+models/reports/*.json
+models/reports/*.txt

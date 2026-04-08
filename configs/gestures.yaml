@@ -1,0 +1,26 @@
+target_mode: "8_gestures"
+
+gesture_sets:
+  8_gestures:
+    - attack_air
+    - defense_air
+    - attack_fire
+    - defense_fire
+    - attack_water
+    - defense_water
+    - attack_earth
+    - defense_earth
+
+  6_gestures:
+    - air
+    - fire
+    - water
+    - earth
+    - attack_mode
+    - defense_mode
+
+  4_gestures:
+    - air
+    - fire
+    - water
+    - earth

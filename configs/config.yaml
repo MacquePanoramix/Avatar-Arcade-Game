@@ -1,0 +1,24 @@
+project_name: "avatar_arcade_ml"
+
+paths:
+  paths_config: "configs/paths.yaml"
+  gestures_config: "configs/gestures.yaml"
+
+capture:
+  input_source: "openpose_json"  # options: kinect | openpose_json
+  fps: 30
+  sequence_length: 30
+  # TODO: Add concrete Kinect settings once hardware dependencies are finalized.
+
+training:
+  random_seed: 42
+  epochs: 10
+  batch_size: 32
+  validation_split: 0.2
+  learning_rate: 0.001
+  lstm_units: 64
+
+inference:
+  confidence_threshold: 0.6
+  smoothing_window: 5
+  cooldown_seconds: 0.5
