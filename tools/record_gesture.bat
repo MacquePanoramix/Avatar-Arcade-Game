@@ -68,23 +68,40 @@ if not "%USE_VIDEO%"=="1" if not "%USE_VIDEO%"=="0" (
 
 REM =============================================================
 REM  BUILD OUTPUT PATHS (do not edit)
+REM  NOTE: Do NOT include trailing backslashes in folder variables.
 REM =============================================================
-set "JSON_DIR=%PROJECT_ROOT%\data\raw\openpose_json\%GESTURE%\%PERSON%\%SESSION%\%TAKE%\"
-set "VIDEO_PATH=%PROJECT_ROOT%\data\raw\rgb_video\%GESTURE%\%PERSON%\%SESSION%\%TAKE%.avi"
+set "JSON_DIR=%PROJECT_ROOT%\data\raw\openpose_json\%GESTURE%\%PERSON%\%SESSION%\%TAKE%"
+set "VIDEO_DIR=%PROJECT_ROOT%\data\raw\rgb_video\%GESTURE%\%PERSON%\%SESSION%"
+set "VIDEO_PATH=%VIDEO_DIR%\%TAKE%.avi"
 
+REM Create JSON output directory if missing
 if not exist "%JSON_DIR%" (
+    echo [INFO] Creating JSON output directory:
+    echo        "%JSON_DIR%"
     mkdir "%JSON_DIR%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to create JSON output directory:
+        echo         "%JSON_DIR%"
+        exit /b 1
+    )
 )
 
-REM Ensure parent folder for video exists if video is enabled
+REM Create video output directory only when video recording is enabled
 if "%USE_VIDEO%"=="1" (
-    if not exist "%PROJECT_ROOT%\data\raw\rgb_video\%GESTURE%\%PERSON%\%SESSION%\" (
-        mkdir "%PROJECT_ROOT%\data\raw\rgb_video\%GESTURE%\%PERSON%\%SESSION%\"
+    if not exist "%VIDEO_DIR%" (
+        echo [INFO] Creating video output directory:
+        echo        "%VIDEO_DIR%"
+        mkdir "%VIDEO_DIR%"
+        if errorlevel 1 (
+            echo [ERROR] Failed to create video output directory:
+            echo         "%VIDEO_DIR%"
+            exit /b 1
+        )
     )
 )
 
 REM =============================================================
-REM  SHOW RESOLVED SETTINGS
+REM  DEBUG: SHOW RESOLVED SETTINGS BEFORE LAUNCH
 REM =============================================================
 echo.
 echo ================== Recording Settings ==================
@@ -96,11 +113,8 @@ echo SESSION       : %SESSION%
 echo TAKE          : %TAKE%
 echo USE_VIDEO     : %USE_VIDEO%
 echo JSON_DIR      : %JSON_DIR%
-if "%USE_VIDEO%"=="1" (
-    echo VIDEO_PATH    : %VIDEO_PATH%
-) else (
-    echo VIDEO_PATH    : ^(disabled^)
-)
+echo VIDEO_DIR     : %VIDEO_DIR%
+echo VIDEO_PATH    : %VIDEO_PATH%
 echo ========================================================
 echo.
 
