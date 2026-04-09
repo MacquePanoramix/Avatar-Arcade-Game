@@ -4,8 +4,9 @@ Beginner-friendly timed OpenPose capture helper for Windows.
 
 .DESCRIPTION
 This script prompts for recording metadata (gesture/person/session/take),
-creates dataset directories inside this repository, starts OpenPose, waits a
-fixed duration, then automatically stops OpenPose.
+creates dataset directories inside this repository, starts OpenPose, waits for
+OpenPose to actually begin writing capture JSON files, then runs a timed
+recording and automatically stops OpenPose.
 
 It is designed for quick, repeatable takes (for example 3-second captures)
 without changing any existing ML pipeline code.
@@ -25,6 +26,12 @@ $DefaultSession = "s01"
 $DefaultUseVideo = $true
 $DefaultDurationSeconds = 3
 $DefaultCountdownSeconds = 3
+
+# Startup readiness settings:
+# - Poll every 200 ms to detect first JSON frame quickly.
+# - Give OpenPose up to 20 seconds to start producing output.
+$CapturePollIntervalMs = 200
+$CaptureStartupTimeoutSeconds = 20
 
 # ============================================================================
 # Helper function: read input with an optional default value.
@@ -141,6 +148,15 @@ if ($useVideo) {
     New-Item -ItemType Directory -Path $videoDir -Force | Out-Null
 }
 
+# Important safety check for timed mode:
+# The capture-ready detector relies on "first new JSON file". If the folder
+# already has JSON files, we cannot tell whether OpenPose just started.
+$existingJson = Get-ChildItem -LiteralPath $jsonDir -Filter "*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($existingJson) {
+    Write-Error "JSON output directory is not empty: $jsonDir. Use a new take name or clear this folder before recording."
+    exit 1
+}
+
 # ============================================================================
 # 4) Print clear summary before recording starts.
 # ============================================================================
@@ -190,24 +206,70 @@ if ($useVideo) {
 }
 
 # ============================================================================
-# 7) Start OpenPose as a child process, wait the requested duration, then stop.
+# 7) Start OpenPose, wait until JSON output confirms capture is live,
+#    then run timed recording and stop OpenPose.
 # ============================================================================
 $openPoseProcess = $null
 try {
-    $openPoseProcess = Start-Process -FilePath $OpenPoseExe -ArgumentList $openPoseArgs -WorkingDirectory $OpenPoseRoot -PassThru
     Write-Host ""
-    Write-Host "OpenPose started (PID: $($openPoseProcess.Id)). Recording..." -ForegroundColor Green
+    Write-Host "Launching OpenPose..." -ForegroundColor Cyan
+
+    $openPoseProcess = Start-Process -FilePath $OpenPoseExe -ArgumentList $openPoseArgs -WorkingDirectory $OpenPoseRoot -PassThru
+    Write-Host ("OpenPose started (PID: {0})." -f $openPoseProcess.Id) -ForegroundColor Green
+
+    # ------------------------------------------------------------------------
+    # Wait for capture readiness:
+    # We only start the timed recording after at least one JSON file appears.
+    # ------------------------------------------------------------------------
+    Write-Host ("Waiting for capture to start (timeout: {0}s)..." -f $CaptureStartupTimeoutSeconds) -ForegroundColor Yellow
+
+    $startupStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $captureIsLive = $false
+
+    while ($startupStopwatch.Elapsed.TotalSeconds -lt $CaptureStartupTimeoutSeconds) {
+        # If OpenPose exits before any JSON file appears, stop with an error.
+        if ($openPoseProcess.HasExited) {
+            throw "OpenPose exited before producing any JSON capture output."
+        }
+
+        $firstJson = Get-ChildItem -LiteralPath $jsonDir -Filter "*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($firstJson) {
+            $captureIsLive = $true
+            break
+        }
+
+        Start-Sleep -Milliseconds $CapturePollIntervalMs
+    }
+
+    if (-not $captureIsLive) {
+        # Startup timeout reached with no JSON output. Stop OpenPose first.
+        Write-Host "Capture startup timeout reached. Stopping OpenPose..." -ForegroundColor Yellow
+
+        if (-not $openPoseProcess.HasExited) {
+            $null = $openPoseProcess.CloseMainWindow()
+            Start-Sleep -Milliseconds 800
+        }
+        if (-not $openPoseProcess.HasExited) {
+            Stop-Process -Id $openPoseProcess.Id -Force
+        }
+
+        throw "Timed out waiting for OpenPose capture output after $CaptureStartupTimeoutSeconds seconds."
+    }
+
+    # Capture is confirmed live; begin the actual timed recording window.
+    Write-Host "Capture is live. Starting timed recording now." -ForegroundColor Green
+    Write-Host ("Timed recording in progress for {0} seconds..." -f $durationSeconds) -ForegroundColor Cyan
 
     Start-Sleep -Milliseconds ([int]($durationSeconds * 1000))
 
-    # Try graceful stop first.
+    # Stop OpenPose (graceful first, then force if needed).
+    Write-Host "Stopping OpenPose..." -ForegroundColor Yellow
+
     if (-not $openPoseProcess.HasExited) {
-        Write-Host "Stopping OpenPose (graceful attempt)..." -ForegroundColor Yellow
         $null = $openPoseProcess.CloseMainWindow()
         Start-Sleep -Milliseconds 800
     }
 
-    # If still alive, force stop.
     if (-not $openPoseProcess.HasExited) {
         Write-Host "OpenPose still running. Forcing stop..." -ForegroundColor Yellow
         Stop-Process -Id $openPoseProcess.Id -Force
