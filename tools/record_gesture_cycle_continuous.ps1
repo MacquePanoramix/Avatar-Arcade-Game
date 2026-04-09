@@ -29,6 +29,7 @@ $ProjectRoot = "D:\Documentos\Python Projects\Avatar-Arcade-Game"
 
 $DefaultPerson = "luis"
 $DefaultSession = "s01"
+$DefaultUseReviewVideo = $true
 $FramesPerTake = 90
 $CapturePollIntervalMs = 200
 $StartupTimeoutSeconds = 20
@@ -69,6 +70,63 @@ function Read-Value {
     }
 
     return $value
+}
+
+# ============================================================================
+# Helper: convert yes/no user input into a boolean.
+# - Empty input uses the provided default.
+# - Accepts friendly values: y/yes/n/no (case-insensitive).
+# - Re-prompts until valid, so beginners do not get silent surprises.
+# ============================================================================
+function Read-YesNo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Prompt,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$DefaultValue
+    )
+
+    while ($true) {
+        $defaultLabel = if ($DefaultValue) { "y" } else { "n" }
+        $raw = (Read-Host "$Prompt [$defaultLabel]").Trim().ToLowerInvariant()
+
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return $DefaultValue
+        }
+
+        if ($raw -in @("y", "yes")) {
+            return $true
+        }
+
+        if ($raw -in @("n", "no")) {
+            return $false
+        }
+
+        Write-Host "Please type y or n." -ForegroundColor Yellow
+    }
+}
+
+# ============================================================================
+# Helper: best-effort frame index extraction from OpenPose JSON filename.
+# Common OpenPose names include a numeric frame chunk such as:
+#   000000000123_keypoints.json
+# We parse the LAST numeric sequence in the basename.
+# If parsing fails, caller can fall back to a sequence index.
+# ============================================================================
+function Get-FrameIndexFromJsonName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+    $match = [regex]::Match($baseName, '(\d+)(?!.*\d)')
+    if ($match.Success) {
+        return [int]$match.Groups[1].Value
+    }
+
+    return $null
 }
 
 # ============================================================================
@@ -222,6 +280,8 @@ if (-not [int]::TryParse($framesInput, [ref]$framesPerTakeResolved) -or $framesP
     exit 1
 }
 
+[bool]$useReviewVideo = Read-YesNo -Prompt "Save one continuous review video for this session? (y/n, default yes)" -DefaultValue $DefaultUseReviewVideo
+
 # ============================================================================
 # 3) Resolve next take label across full cycle.
 # ============================================================================
@@ -242,6 +302,17 @@ $runTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $liveRunFolder = Join-Path $liveSessionFolder ("session_{0}" -f $runTimestamp)
 New-Item -ItemType Directory -Path $liveRunFolder -Force | Out-Null
 
+# One manifest CSV for the whole cycle run.
+# We append one row per successful gesture capture.
+$manifestCsvPath = Join-Path $liveRunFolder "cycle_manifest.csv"
+
+# Optional one-file continuous review video path.
+# IMPORTANT: this is NOT split per gesture.
+$reviewVideoPath = $null
+if ($useReviewVideo) {
+    $reviewVideoPath = Join-Path $liveRunFolder "session_review.avi"
+}
+
 $preexistingJson = Get-ChildItem -LiteralPath $liveRunFolder -Filter "*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($preexistingJson) {
     Write-Error "Live run folder already contains JSON files: $liveRunFolder"
@@ -250,8 +321,19 @@ if ($preexistingJson) {
 
 # ============================================================================
 # 5) Launch OpenPose ONCE with JSON output pointed to live run folder.
+# Optional: also write one continuous review video for the full session.
 # ============================================================================
-$openPoseArgs = "--number_people_max 1 --tracking 1 --write_json `"$liveRunFolder`""
+$openPoseArgParts = @(
+    "--number_people_max 1",
+    "--tracking 1",
+    "--write_json `"$liveRunFolder`""
+)
+
+if ($useReviewVideo) {
+    $openPoseArgParts += "--write_video `"$reviewVideoPath`""
+}
+
+$openPoseArgs = ($openPoseArgParts -join " ")
 $openPoseProcess = $null
 $successfulGestures = New-Object System.Collections.Generic.List[string]
 
@@ -344,6 +426,41 @@ try {
             Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $destJsonDir $file.Name)
         }
 
+        # Build manifest row values for this successful gesture.
+        # start/end frame index: prefer parsed OpenPose frame ids from filenames,
+        # fallback to live sequence index boundaries if filename parsing fails.
+        $firstSelected = $selectedTakeFiles | Select-Object -First 1
+        $lastSelected = $selectedTakeFiles | Select-Object -Last 1
+
+        $parsedStartFrame = Get-FrameIndexFromJsonName -FileName $firstSelected.Name
+        $parsedEndFrame = Get-FrameIndexFromJsonName -FileName $lastSelected.Name
+
+        $fallbackStartFrame = $baselineCount
+        $fallbackEndFrame = $baselineCount + $selectedTakeFiles.Count - 1
+
+        $startFrameIndex = if ($null -ne $parsedStartFrame) { $parsedStartFrame } else { $fallbackStartFrame }
+        $endFrameIndex = if ($null -ne $parsedEndFrame) { $parsedEndFrame } else { $fallbackEndFrame }
+
+        # Append one CSV row. Export-Csv handles escaping for commas safely.
+        $manifestRow = [pscustomobject]@{
+            gesture           = $gesture
+            person            = $person
+            session           = $session
+            take              = $take
+            start_frame_index = $startFrameIndex
+            end_frame_index   = $endFrameIndex
+            frames_copied     = $selectedTakeFiles.Count
+            json_destination  = $destJsonDir
+            review_video_path = if ($useReviewVideo) { $reviewVideoPath } else { "" }
+        }
+
+        if (Test-Path -LiteralPath $manifestCsvPath -PathType Leaf) {
+            $manifestRow | Export-Csv -LiteralPath $manifestCsvPath -NoTypeInformation -Append
+        }
+        else {
+            $manifestRow | Export-Csv -LiteralPath $manifestCsvPath -NoTypeInformation
+        }
+
         $successfulGestures.Add($gesture)
         Write-Host ("Success: copied {0} frames to {1}" -f $selectedTakeFiles.Count, $destJsonDir) -ForegroundColor Green
     }
@@ -356,6 +473,12 @@ finally {
     Write-Host ""
     Write-Host "====================== Cycle summary =======================" -ForegroundColor Green
     Write-Host ("Take label used: {0}" -f $take) -ForegroundColor Green
+    Write-Host ("Cycle manifest: {0}" -f $manifestCsvPath) -ForegroundColor Green
+
+    if ($useReviewVideo) {
+        Write-Host ("Review video: {0}" -f $reviewVideoPath) -ForegroundColor Green
+    }
+
     Write-Host "Successful gestures:" -ForegroundColor Green
 
     if ($successfulGestures.Count -eq 0) {
