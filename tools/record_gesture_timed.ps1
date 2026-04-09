@@ -187,22 +187,17 @@ for ($i = $DefaultCountdownSeconds; $i -ge 1; $i--) {
 Write-Host "GO" -ForegroundColor Green
 
 # ============================================================================
-# 6) Build OpenPose arguments.
-#    Required flags:
-#      --number_people_max 1
-#      --tracking 1
-#      --write_json <JSON_DIR>
-#    Optional:
-#      --write_video <VIDEO_PATH>
+# 6) Build OpenPose arguments as a SINGLE STRING.
+#    Why string and not array?
+#    - Some shells/process launchers can split argument arrays in unexpected
+#      ways when paths contain spaces.
+#    - A single explicitly quoted argument string is easier to debug and
+#      keeps path values intact (for example in "D:\Documentos\Python Projects\...").
 # ============================================================================
-$openPoseArgs = @(
-    "--number_people_max", "1",
-    "--tracking", "1",
-    "--write_json", $jsonDir
-)
+$openPoseArgs = "--number_people_max 1 --tracking 1 --write_json `"$jsonDir`""
 
 if ($useVideo) {
-    $openPoseArgs += @("--write_video", $videoPath)
+    $openPoseArgs += " --write_video `"$videoPath`""
 }
 
 # ============================================================================
@@ -213,6 +208,7 @@ $openPoseProcess = $null
 try {
     Write-Host ""
     Write-Host "Launching OpenPose..." -ForegroundColor Cyan
+    Write-Host ("OpenPose arguments: {0}" -f $openPoseArgs) -ForegroundColor DarkGray
 
     $openPoseProcess = Start-Process -FilePath $OpenPoseExe -ArgumentList $openPoseArgs -WorkingDirectory $OpenPoseRoot -PassThru
     Write-Host ("OpenPose started (PID: {0})." -f $openPoseProcess.Id) -ForegroundColor Green
@@ -229,7 +225,7 @@ try {
     while ($startupStopwatch.Elapsed.TotalSeconds -lt $CaptureStartupTimeoutSeconds) {
         # If OpenPose exits before any JSON file appears, stop with an error.
         if ($openPoseProcess.HasExited) {
-            throw "OpenPose exited before producing any JSON capture output."
+            throw "OpenPose exited before capture started and no JSON output was produced. Arguments used: $openPoseArgs"
         }
 
         $firstJson = Get-ChildItem -LiteralPath $jsonDir -Filter "*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
