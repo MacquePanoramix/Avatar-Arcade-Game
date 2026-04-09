@@ -116,9 +116,9 @@ function Get-NextTakeLabel {
     # 2) Add one.
     # 3) Build label using string concatenation + ToString("000").
     # This avoids edge cases where format placeholders can fail.
-    [int]$maxTake = ($takeNumbers | Measure-Object -Maximum).Maximum
-    [int]$nextTakeNumber = $maxTake + 1
-    return "take_" + $nextTakeNumber.ToString("000")
+    $maxTake = [int](($takeNumbers | Measure-Object -Maximum).Maximum)
+    $nextTakeNumber = $maxTake + 1
+    return ("take_" + $nextTakeNumber.ToString("000"))
 }
 
 # ============================================================================
@@ -142,6 +142,10 @@ function Wait-ForLiveCaptureStart {
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     [bool]$firstJsonDetected = $false
+
+    # Explicit one-time debug header so beginners can immediately verify the
+    # exact folder OpenPose is expected to write into.
+    Write-Host ("[DEBUG] Waiting for first JSON in live run folder: {0}" -f $LiveRunFolder) -ForegroundColor DarkGray
 
     while ($stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         if ($OpenPoseProcess.HasExited) {
@@ -171,8 +175,8 @@ function Wait-ForLiveCaptureStart {
     }
 
     $filesAfterTimeout = Get-ChildItem -LiteralPath $LiveRunFolder -Filter "*.json" -File -ErrorAction SilentlyContinue
-    [bool]$liveRunFolderStayedEmpty = ($filesAfterTimeout.Count -eq 0)
-    throw ("Startup timed out after {0} seconds. Live run folder stayed empty: {1}. Live run folder path: {2}. No gesture capture has started yet." -f $TimeoutSeconds, $liveRunFolderStayedEmpty, $LiveRunFolder)
+    [int]$jsonCountAfterTimeout = $filesAfterTimeout.Count
+    throw ("Startup timed out after {0} seconds. Live run folder path: {1}. Current JSON file count: {2}. No gesture capture has started yet." -f $TimeoutSeconds, $LiveRunFolder, $jsonCountAfterTimeout)
 }
 
 Write-Host ""
