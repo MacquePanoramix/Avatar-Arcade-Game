@@ -67,3 +67,32 @@ For cleaner training examples, one take should include:
 
 - `OPENPOSE_ROOT=D:\Programs\OpenPose\openpose`
 - `PROJECT_ROOT=D:\Documentos\Python Projects\Avatar-Arcade-Game`
+
+## Timed helper (PowerShell)
+
+Use `record_gesture_timed.ps1` when you want a fixed-length capture workflow that is friendly for beginners:
+
+- prompts for gesture/person/session/take
+- creates output folders automatically
+- gives a short countdown
+- launches OpenPose
+- records for a fixed duration (default 3 seconds)
+- stops OpenPose automatically
+- prints where JSON/video were saved
+
+Why fixed-duration capture helps:
+
+- Every take uses the same time budget, which is easier to repeat consistently.
+- It speeds up collection because you do not need to stop OpenPose manually each time.
+- It keeps raw recordings uniform even before later trimming or model windowing.
+
+Example usage from PowerShell:
+
+```powershell
+cd D:\Documentos\Python Projects\Avatar-Arcade-Game\tools
+.\record_gesture_timed.ps1
+```
+
+You can edit defaults at the top of the script (`$OpenPoseRoot`, `$ProjectRoot`, person/session/video/duration/countdown) to match your machine and preferred settings.
+
+> Note: the raw captured clip can still be longer than the final model input window used downstream. This helper only standardizes capture-time duration.
