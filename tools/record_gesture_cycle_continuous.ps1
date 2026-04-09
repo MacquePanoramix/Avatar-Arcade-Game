@@ -106,12 +106,19 @@ function Get-NextTakeLabel {
         }
     }
 
+    # If no takes exist yet, we always start at take_001.
     if ($takeNumbers.Count -eq 0) {
         return "take_001"
     }
 
-    $maxTake = ($takeNumbers | Measure-Object -Maximum).Maximum
-    return ("take_{0:D3}" -f ($maxTake + 1))
+    # Safer beginner-friendly formatting:
+    # 1) Resolve max take as an integer.
+    # 2) Add one.
+    # 3) Build label using string concatenation + ToString("000").
+    # This avoids edge cases where format placeholders can fail.
+    [int]$maxTake = ($takeNumbers | Measure-Object -Maximum).Maximum
+    [int]$nextTakeNumber = $maxTake + 1
+    return "take_" + $nextTakeNumber.ToString("000")
 }
 
 # ============================================================================
@@ -134,21 +141,38 @@ function Wait-ForLiveCaptureStart {
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    [bool]$firstJsonDetected = $false
 
     while ($stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         if ($OpenPoseProcess.HasExited) {
             throw "OpenPose exited before capture became live."
         }
 
-        $firstJson = Get-ChildItem -LiteralPath $LiveRunFolder -Filter "*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        # Debug snapshot for beginners:
+        # - exact live folder path
+        # - whether first JSON has appeared yet
+        # - current live JSON count
+        $allJsonFiles = Get-ChildItem -LiteralPath $LiveRunFolder -Filter "*.json" -File -ErrorAction SilentlyContinue
+        [int]$liveJsonCount = $allJsonFiles.Count
+        $firstJson = $allJsonFiles | Select-Object -First 1
         if ($firstJson) {
+            $firstJsonDetected = $true
+            Write-Host ("[DEBUG] Live run folder      : {0}" -f $LiveRunFolder) -ForegroundColor DarkGray
+            Write-Host ("[DEBUG] First JSON detected  : {0}" -f $firstJsonDetected) -ForegroundColor DarkGray
+            Write-Host ("[DEBUG] Current JSON count   : {0}" -f $liveJsonCount) -ForegroundColor DarkGray
             return
         }
+
+        Write-Host ("[DEBUG] Live run folder      : {0}" -f $LiveRunFolder) -ForegroundColor DarkGray
+        Write-Host ("[DEBUG] First JSON detected  : {0}" -f $firstJsonDetected) -ForegroundColor DarkGray
+        Write-Host ("[DEBUG] Current JSON count   : {0}" -f $liveJsonCount) -ForegroundColor DarkGray
 
         Start-Sleep -Milliseconds $PollIntervalMs
     }
 
-    throw "Timed out after $TimeoutSeconds seconds waiting for OpenPose to write first JSON file."
+    $filesAfterTimeout = Get-ChildItem -LiteralPath $LiveRunFolder -Filter "*.json" -File -ErrorAction SilentlyContinue
+    [bool]$liveRunFolderStayedEmpty = ($filesAfterTimeout.Count -eq 0)
+    throw ("Startup timed out after {0} seconds. Live run folder stayed empty: {1}. Live run folder path: {2}. No gesture capture has started yet." -f $TimeoutSeconds, $liveRunFolderStayedEmpty, $LiveRunFolder)
 }
 
 Write-Host ""
@@ -237,7 +261,10 @@ try {
     # Wait until OpenPose is truly live (first JSON appears), with timeout.
     Write-Host ("Waiting for live JSON output (timeout: {0}s)..." -f $StartupTimeoutSeconds) -ForegroundColor Yellow
     Wait-ForLiveCaptureStart -OpenPoseProcess $openPoseProcess -LiveRunFolder $liveRunFolder -PollIntervalMs $CapturePollIntervalMs -TimeoutSeconds $StartupTimeoutSeconds
-    Write-Host "Capture is live. You can begin the guided cycle." -ForegroundColor Green
+    Write-Host "Capture is live." -ForegroundColor Green
+    Write-Host ("The first gesture will be: {0}" -f $GestureCycle[0]) -ForegroundColor Green
+    Write-Host "Press ENTER when ready to start that gesture." -ForegroundColor Green
+    $null = Read-Host
 
     # ========================================================================
     # 6) Guided cycle loop.
