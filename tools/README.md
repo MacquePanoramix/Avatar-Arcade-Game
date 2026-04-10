@@ -157,3 +157,32 @@ Example usage from PowerShell:
 cd D:\Documentos\Python Projects\Avatar-Arcade-Game\tools
 .\record_gesture_cycle_continuous.ps1
 ```
+
+
+## Continuous idle-pose helper (PowerShell, JSON only)
+
+Use `record_idle_pose_continuous.ps1` when you want to collect one idle sample at a time while keeping OpenPose running continuously.
+
+What it does:
+
+- prompts once for person/session/frames-per-take and optional continuous review video
+- fixes gesture label to `idle`
+- creates/uses `data/raw/openpose_json/idle/<person>/<session>/`
+- auto-finds the next safe `take_###` (starts at `take_001`, skips folders that already contain JSON)
+- launches OpenPose one time and writes JSON to one live buffer run folder
+- lets you press ENTER to record exactly 90 new JSON frames per idle sample (or your chosen frame count)
+- lets you type `q` to quit cleanly
+- appends one row per sample to `idle_manifest.csv` in the live run folder
+- optionally writes one continuous session review video (`session_review.avi`) in the same live run folder
+
+Double-click launcher:
+
+- `record_idle_pose.bat`
+- this runs the PowerShell helper from the repo root with process-local `ExecutionPolicy Bypass`
+
+Typical use:
+
+1. Double-click `tools\record_idle_pose.bat`
+2. Confirm prompts (defaults are beginner-friendly)
+3. Repeatedly press ENTER to capture one idle sample at a time
+4. Type `q` when done
