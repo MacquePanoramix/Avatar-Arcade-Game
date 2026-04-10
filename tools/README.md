@@ -186,3 +186,10 @@ Typical use:
 2. Confirm prompts (defaults are beginner-friendly)
 3. Repeatedly press ENTER to capture one idle sample at a time
 4. Type `q` when done
+
+## Label-space note (locked schema)
+
+- `idle` is now a real class in the training label space (9 classes total including idle).
+- Store idle samples under:
+  - `data/raw/openpose_json/idle/<person>/<session>/<take>/`
+- Treat one take folder as one sample, with a target of 90 frames per sample for the first model version.

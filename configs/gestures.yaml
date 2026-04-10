@@ -1,6 +1,19 @@
-target_mode: "8_gestures"
+# Locked default for the first classifier: 9 classes = 8 gestures + idle.
+# `idle` is now a real training label (the 9th class), not just a transition pose.
+target_mode: "9_gestures_with_idle"
 
 gesture_sets:
+  9_gestures_with_idle:
+    - attack_air
+    - defense_air
+    - attack_fire
+    - defense_fire
+    - attack_water
+    - defense_water
+    - attack_earth
+    - defense_earth
+    - idle
+
   8_gestures:
     - attack_air
     - defense_air

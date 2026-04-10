@@ -7,7 +7,8 @@ paths:
 capture:
   input_source: "openpose_json"  # options: kinect | openpose_json
   fps: 30
-  sequence_length: 30
+  sequence_length: 90  # Locked schema: one take folder = one sample, and one sample is expected to contain 90 frames.
+  # First-model feature plan: BODY_25 x,y only => 50 features per frame (25 keypoints * 2 coordinates).
   # TODO: Add concrete Kinect settings once hardware dependencies are finalized.
 
 training:

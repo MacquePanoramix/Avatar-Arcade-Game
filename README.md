@@ -12,7 +12,7 @@ The Unity game client is expected to live in a separate repository.
   4. inference
   5. Unity bridge
 - Use an **LSTM** classifier over pose/skeleton sequence data.
-- Keep gesture scope configurable for **8 / 6 / 4** gesture modes.
+- Keep gesture scope configurable for **9 / 8 / 6 / 4** gesture modes (default first classifier: 8 gestures + idle).
 - Keep architecture ready for either:
   - direct Kinect skeleton streams (future)
   - OpenPose JSON input fallback
