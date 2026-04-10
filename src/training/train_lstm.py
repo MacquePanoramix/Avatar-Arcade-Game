@@ -12,6 +12,7 @@ and saves baseline reports/artifacts for a first training run.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -176,6 +177,73 @@ def save_history(history: keras.callbacks.History, reports_dir: Path) -> None:
     plt.close()
 
 
+def save_tiny_overfit_history(history: keras.callbacks.History, reports_dir: Path) -> None:
+    """Save tiny-overfit history using dedicated filenames."""
+    history_df = pd.DataFrame(history.history)
+    history_csv_path = reports_dir / "tiny_overfit_history.csv"
+    history_df.to_csv(history_csv_path, index=False)
+
+    # In tiny-overfit mode we only train on one tiny subset (no validation split),
+    # so plotting training-only curves keeps the figure easy to understand.
+    plt.figure(figsize=(10, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history.get("loss", []), label="loss")
+    plt.title("Tiny Overfit Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history.get("accuracy", []), label="accuracy")
+    plt.title("Tiny Overfit Accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(reports_dir / "tiny_overfit_history.png", dpi=150)
+    plt.close()
+
+
+def build_tiny_balanced_subset(
+    x: np.ndarray,
+    y: np.ndarray,
+    max_samples_per_class: int,
+    random_seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Create a tiny, roughly balanced subset with up to N samples per class."""
+    rng = np.random.default_rng(random_seed)
+    chosen_indices: list[int] = []
+
+    # We explicitly loop class-by-class to keep class balance simple and clear.
+    for class_id in sorted(np.unique(y)):
+        class_indices = np.where(y == class_id)[0]
+        rng.shuffle(class_indices)
+        selected_for_class = class_indices[:max_samples_per_class]
+        chosen_indices.extend(selected_for_class.tolist())
+
+    # Shuffle one final time so tiny training batches are not grouped by class.
+    chosen_indices_array = np.array(chosen_indices, dtype=int)
+    rng.shuffle(chosen_indices_array)
+
+    return x[chosen_indices_array], y[chosen_indices_array]
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse optional CLI flags for training modes."""
+    parser = argparse.ArgumentParser(description="Train baseline LSTM for Avatar Arcade data.")
+    parser.add_argument(
+        "--tiny-overfit",
+        action="store_true",
+        help=(
+            "Run a tiny diagnostic training mode (up to 2 samples per class, no split) "
+            "to check if the pipeline can memorize a very small dataset."
+        ),
+    )
+    return parser.parse_args()
+
+
 def save_test_reports(
     y_test: np.ndarray,
     y_pred: np.ndarray,
@@ -215,6 +283,8 @@ def save_test_reports(
 
 def main() -> None:
     """Run full first-baseline training flow."""
+    args = parse_args()
+
     config = load_config(Path("configs/config.yaml"))
 
     random_seed = int(get_training_value(config, "random_seed", 42))
@@ -240,6 +310,78 @@ def main() -> None:
 
     if x.ndim != 3:
         raise ValueError(f"Expected X shape (samples, timesteps, features), got {x.shape}")
+
+    if args.tiny_overfit:
+        print("\n=== Tiny Overfit Diagnostic Mode (enabled) ===")
+        print("This mode trains on a tiny balanced subset only (no train/val/test split).")
+
+        # Build a tiny subset with up to 2 samples per class.
+        x_tiny, y_tiny = build_tiny_balanced_subset(
+            x=x,
+            y=y,
+            max_samples_per_class=2,
+            random_seed=random_seed,
+        )
+
+        print(f"Tiny subset shape: X={x_tiny.shape}, y={y_tiny.shape}")
+        print("Expected target is ~18 samples for 9 classes (if all classes have >= 2 samples).")
+
+        # Keep the same architecture and input shape as normal training.
+        model = build_lstm_model(
+            input_shape=(x.shape[1], x.shape[2]),
+            num_classes=9,
+            lstm_units=lstm_units,
+            learning_rate=learning_rate,
+        )
+
+        print("\n=== Model Summary ===")
+        model.summary()
+
+        # Diagnostic behavior:
+        # - more epochs to give model enough time to memorize
+        # - no early stopping
+        # - verbose=1 so training accuracy is printed each epoch
+        tiny_epochs = 50
+        history = model.fit(
+            x_tiny,
+            y_tiny,
+            epochs=tiny_epochs,
+            batch_size=batch_size,
+            verbose=1,
+        )
+
+        save_tiny_overfit_history(history, reports_dir)
+
+        final_train_loss = float(history.history.get("loss", [np.nan])[-1])
+        final_train_acc = float(history.history.get("accuracy", [np.nan])[-1])
+        tiny_unique, tiny_counts = np.unique(y_tiny, return_counts=True)
+        id_to_name = {int(v): k for k, v in label_map.get("label_to_id", {}).items()}
+
+        print("\n=== Tiny Overfit Summary ===")
+        print(f"Subset size: {len(y_tiny)}")
+        print("Class counts in tiny subset:")
+        for class_id, count in zip(tiny_unique, tiny_counts):
+            class_name = id_to_name.get(int(class_id), f"class_{int(class_id)}")
+            print(f"  - {class_id} ({class_name}): {count}")
+        print(f"Final training accuracy: {final_train_acc:.4f}")
+        print(f"Final training loss: {final_train_loss:.4f}")
+
+        print("\nInterpretation hint:")
+        if final_train_acc >= 0.90:
+            print(
+                "- Very high final training accuracy suggests the current pipeline can "
+                "memorize a tiny dataset."
+            )
+        else:
+            print(
+                "- Low final training accuracy on this tiny set suggests a likely issue in "
+                "preprocessing, representation, or model setup."
+            )
+
+        print("\n=== Saved Tiny Overfit Outputs ===")
+        print(f"- Tiny history CSV: {reports_dir / 'tiny_overfit_history.csv'}")
+        print(f"- Tiny history plot: {reports_dir / 'tiny_overfit_history.png'}")
+        return
 
     train_idx, val_idx, test_idx = split_data_stratified(x, y, random_state=random_seed)
 
