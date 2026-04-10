@@ -135,3 +135,30 @@ The command writes:
 - Marks likely identity-switch/catastrophic jumps as bad frames.
 - Repairs bad frames by copy-forward (and future-fill for bad leading frames).
 - If a whole take has no valid frames, fills the sample with zeros and records that in metadata.
+
+## First LSTM training run
+
+Use this command to train the first baseline LSTM model on already preprocessed OpenPose data:
+
+```bash
+python -m src.training.train_lstm
+```
+
+Expected processed inputs (must already exist):
+
+- `data/processed/X.npy`
+- `data/processed/y.npy`
+- `data/processed/metadata.csv`
+- `data/processed/label_map.json`
+
+Main outputs are saved to:
+
+- `models/checkpoints/best_lstm.keras`
+- `models/reports/training_history.csv`
+- `models/reports/training_history.png`
+- `models/reports/classification_report.txt`
+- `models/reports/confusion_matrix.csv`
+- `models/reports/test_predictions.csv`
+- `data/splits/train_indices.npy`
+- `data/splits/val_indices.npy`
+- `data/splits/test_indices.npy`
