@@ -88,3 +88,50 @@ Copy `.env.example` to `.env` if you want local environment customization.
 4. Implement full training loop with metrics/reporting.
 5. Add robust real-time inference and Unity bridge protocol.
 6. Add model versioning and experiment tracking.
+
+---
+
+## OpenPose Preprocessing v1 (Dataset Build Only)
+
+This project now includes a preprocessing entry point that converts raw OpenPose JSON captures into fixed-shape training tensors.
+
+### Run preprocessing
+
+```bash
+python -m src.preprocessing.build_openpose_dataset
+```
+
+Optional inspection mode:
+
+```bash
+python -m src.preprocessing.build_openpose_dataset --inspect-index 0
+```
+
+### Input structure
+
+Preprocessing reads takes from:
+
+```text
+data/raw/openpose_json/<gesture>/<person>/<session>/<take>/
+```
+
+Each take folder is treated as one sample.
+
+### Produced files
+
+The command writes:
+
+- `data/processed/X.npy` with shape `(N, 90, 50)`
+- `data/processed/y.npy` with shape `(N,)`
+- `data/processed/metadata.csv` (one row per sample)
+- `data/processed/label_map.json` (target mode + label mappings)
+
+### v1 normalization / repair choices
+
+- Uses BODY_25 keypoints, `x,y` only.
+- Uses `Neck` as center anchor with `MidHip` fallback.
+- Uses robust weighted body scale from shoulder width / torso length / hip width.
+- Smooths accepted frame scale over time (`0.8 * prev + 0.2 * current`).
+- Marks likely identity-switch/catastrophic jumps as bad frames.
+- Repairs bad frames by copy-forward (and future-fill for bad leading frames).
+- If a whole take has no valid frames, fills the sample with zeros and records that in metadata.
