@@ -38,6 +38,9 @@ METADATA_COLUMNS = [
     "sample_path",
     "num_raw_frames",
     "num_bad_frames",
+    "num_joint_zero_fallbacks",
+    "num_joint_interpolations",
+    "num_joint_symmetric_fills",
     "used_future_fill_for_start",
     "was_all_zero_sample",
 ]
@@ -70,6 +73,22 @@ MULTI_JOINT_JUMP_SCALE_MULTIPLIER = 1.25
 CENTER_JUMP_SCALE_MULTIPLIER = 1.50
 MULTI_JOINT_MIN_COUNT = 2
 
+# BODY_25 left/right symmetry pairs for joint-level fallback imputation.
+# Each tuple is (left_joint_index, right_joint_index).
+SYMMETRIC_JOINT_PAIRS: list[tuple[int, int]] = [
+    (2, 5),   # RShoulder <-> LShoulder
+    (3, 6),   # RElbow <-> LElbow
+    (4, 7),   # RWrist <-> LWrist
+    (9, 12),  # RHip <-> LHip
+    (10, 13), # RKnee <-> LKnee
+    (11, 14), # RAnkle <-> LAnkle
+    (15, 16), # REye <-> LEye
+    (17, 18), # REar <-> LEar
+    (22, 19), # RBigToe <-> LBigToe
+    (23, 20), # RSmallToe <-> LSmallToe
+    (24, 21), # RHeel <-> LHeel
+]
+
 
 @dataclass
 class ParsedFrame:
@@ -89,6 +108,9 @@ class SampleResult:
     sample_90x50: np.ndarray
     num_raw_frames: int
     num_bad_frames: int
+    num_joint_zero_fallbacks: int
+    num_joint_interpolations: int
+    num_joint_symmetric_fills: int
     used_future_fill_for_start: bool
     was_all_zero_sample: bool
 
@@ -211,6 +233,112 @@ def _collect_take_frame_paths(take_dir: Path) -> list[Path]:
     return sorted(p for p in take_dir.iterdir() if p.is_file() and p.suffix == ".json")
 
 
+def _build_symmetric_counterpart_map() -> dict[int, int]:
+    """Build index -> mirrored counterpart lookup from pair list."""
+    counterpart_map: dict[int, int] = {}
+    for a_idx, b_idx in SYMMETRIC_JOINT_PAIRS:
+        counterpart_map[a_idx] = b_idx
+        counterpart_map[b_idx] = a_idx
+    return counterpart_map
+
+
+def _impute_joint_values_temporally(
+    sample_90x25x2: np.ndarray,
+    usable_90x25: np.ndarray,
+) -> tuple[np.ndarray, int]:
+    """Fill joint-level gaps over time for each joint independently.
+
+    Policy:
+    - Interior missing region: linear interpolation between nearest valid neighbors.
+    - Leading missing region: backfill from first valid frame.
+    - Trailing missing region: forward-fill from last valid frame.
+
+    Returns:
+        (imputed_xy, num_interpolated_joint_frames)
+    """
+    imputed = sample_90x25x2.copy()
+    seq_len, num_joints, _ = imputed.shape
+    num_interpolations = 0
+
+    for joint_idx in range(num_joints):
+        valid_mask = usable_90x25[:, joint_idx]
+        valid_indices = np.flatnonzero(valid_mask)
+
+        # If the joint is missing for the full take, leave it for symmetry/zero fallback.
+        if len(valid_indices) == 0:
+            continue
+
+        first_valid = int(valid_indices[0])
+        last_valid = int(valid_indices[-1])
+
+        # Beginning of take: copy the first valid value backwards.
+        if first_valid > 0:
+            imputed[:first_valid, joint_idx, :] = imputed[first_valid, joint_idx, :]
+            num_interpolations += first_valid
+
+        # End of take: copy the last valid value forwards.
+        if last_valid < seq_len - 1:
+            trailing_count = (seq_len - 1) - last_valid
+            imputed[last_valid + 1 :, joint_idx, :] = imputed[last_valid, joint_idx, :]
+            num_interpolations += trailing_count
+
+        # Interior gaps: linearly interpolate x/y together between valid anchors.
+        for left_idx, right_idx in zip(valid_indices[:-1], valid_indices[1:]):
+            gap = int(right_idx - left_idx - 1)
+            if gap <= 0:
+                continue
+
+            left_xy = imputed[left_idx, joint_idx, :]
+            right_xy = imputed[right_idx, joint_idx, :]
+            for offset in range(1, gap + 1):
+                alpha = offset / (gap + 1)
+                fill_idx = left_idx + offset
+                imputed[fill_idx, joint_idx, :] = (1.0 - alpha) * left_xy + alpha * right_xy
+                num_interpolations += 1
+
+    return imputed, num_interpolations
+
+
+def _fill_entirely_missing_joints_with_symmetry(
+    sample_90x25x2: np.ndarray,
+    usable_90x25: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Fill joints missing in all frames by mirroring symmetric counterpart if possible.
+
+    Mirroring uses the centered-body axis from normalization:
+      mirrored_x = -x
+      mirrored_y = y
+
+    Returns:
+        (updated_xy, updated_usable_mask, num_symmetric_joint_fills)
+    """
+    filled = sample_90x25x2.copy()
+    usable_after = usable_90x25.copy()
+    counterpart_map = _build_symmetric_counterpart_map()
+    num_symmetric_fills = 0
+
+    for joint_idx in range(NUM_JOINTS):
+        # Only target joints that are fully missing across the take.
+        if np.any(usable_after[:, joint_idx]):
+            continue
+
+        counterpart_idx = counterpart_map.get(joint_idx)
+        if counterpart_idx is None:
+            continue
+
+        counterpart_usable = usable_after[:, counterpart_idx]
+        if not np.any(counterpart_usable):
+            continue
+
+        # Mirror full sequence from counterpart (x flips sign, y stays).
+        filled[:, joint_idx, 0] = -filled[:, counterpart_idx, 0]
+        filled[:, joint_idx, 1] = filled[:, counterpart_idx, 1]
+        usable_after[:, joint_idx] = True
+        num_symmetric_fills += SEQUENCE_LENGTH
+
+    return filled, usable_after, num_symmetric_fills
+
+
 def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleResult:
     """Convert one take folder into a fixed sample with shape (90, 50)."""
     json_paths = _collect_take_frame_paths(take_dir)
@@ -316,9 +444,6 @@ def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleR
 
         normalized_xy = (xy - center[None, :]) / smoothed_scale
 
-        # For extremely low-confidence joints, zero out coordinates.
-        normalized_xy[~usable_mask] = 0.0
-
         parsed_frames.append(
             ParsedFrame(
                 xy=normalized_xy,
@@ -347,6 +472,9 @@ def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleR
             sample_90x50=sample_90x50,
             num_raw_frames=num_raw_frames,
             num_bad_frames=SEQUENCE_LENGTH,
+            num_joint_zero_fallbacks=SEQUENCE_LENGTH * NUM_JOINTS,
+            num_joint_interpolations=0,
+            num_joint_symmetric_fills=0,
             used_future_fill_for_start=False,
             was_all_zero_sample=True,
         )
@@ -372,8 +500,40 @@ def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleR
         else:
             last_valid = repaired_frames[idx]
 
-    # Convert (90, 25, 2) -> (90, 50)
+    # Convert repaired timeline to dense array for joint-level imputation work.
     sample_90x25x2 = np.stack(repaired_frames, axis=0).astype(np.float32)
+    usable_90x25 = np.stack(
+        [
+            fr.usable_mask.copy() if fr.usable_mask is not None else np.zeros(NUM_JOINTS, dtype=bool)
+            for fr in parsed_frames
+        ],
+        axis=0,
+    )
+
+    # -----------------------------
+    # Joint-level imputation pass (v1)
+    # -----------------------------
+    # 1) Temporal interpolation/backfill/forward-fill for each joint independently.
+    sample_90x25x2, num_joint_interpolations = _impute_joint_values_temporally(
+        sample_90x25x2=sample_90x25x2,
+        usable_90x25=usable_90x25,
+    )
+
+    # 2) Entirely missing joint fallback: mirror symmetric counterpart if available.
+    sample_90x25x2, usable_after_symmetry, num_joint_symmetric_fills = (
+        _fill_entirely_missing_joints_with_symmetry(
+            sample_90x25x2=sample_90x25x2,
+            usable_90x25=usable_90x25,
+        )
+    )
+
+    # 3) Last-resort zero fallback for any joint/frame slots still unusable.
+    missing_after_all = ~usable_after_symmetry
+    num_joint_zero_fallbacks = int(np.count_nonzero(missing_after_all))
+    if num_joint_zero_fallbacks > 0:
+        sample_90x25x2[missing_after_all] = 0.0
+
+    # Final flattening shape remains (90, 50).
     sample_90x50 = sample_90x25x2.reshape(SEQUENCE_LENGTH, FEATURES_PER_FRAME)
 
     num_bad_frames = sum(fr.is_bad for fr in parsed_frames)
@@ -382,6 +542,9 @@ def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleR
         sample_90x50=sample_90x50,
         num_raw_frames=num_raw_frames,
         num_bad_frames=num_bad_frames,
+        num_joint_zero_fallbacks=num_joint_zero_fallbacks,
+        num_joint_interpolations=num_joint_interpolations,
+        num_joint_symmetric_fills=num_joint_symmetric_fills,
         used_future_fill_for_start=used_future_fill_for_start,
         was_all_zero_sample=False,
     )
@@ -511,6 +674,9 @@ def build_openpose_dataset(
                 "sample_path": str(take_dir.relative_to(resolve_path("."))),
                 "num_raw_frames": result.num_raw_frames,
                 "num_bad_frames": result.num_bad_frames,
+                "num_joint_zero_fallbacks": result.num_joint_zero_fallbacks,
+                "num_joint_interpolations": result.num_joint_interpolations,
+                "num_joint_symmetric_fills": result.num_joint_symmetric_fills,
                 "used_future_fill_for_start": result.used_future_fill_for_start,
                 "was_all_zero_sample": result.was_all_zero_sample,
             }
