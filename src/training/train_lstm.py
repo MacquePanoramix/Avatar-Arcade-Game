@@ -156,6 +156,49 @@ def build_lstm_model(
     return model
 
 
+def build_motion_aware_sequences(x: np.ndarray) -> np.ndarray:
+    """Create motion-aware inputs by concatenating position and frame deltas.
+
+    Delta rule used:
+    - delta[t] = x[t] - x[t-1]
+    - delta[0] = 0 (all-zero vector for the first frame)
+
+    For an original per-sample shape of (timesteps, features) = (90, 30),
+    this returns (90, 60) after concatenating [position, delta] per frame.
+    """
+    if x.ndim != 3:
+        raise ValueError(f"Expected 3D array (samples, timesteps, features), got {x.shape}")
+
+    deltas = np.zeros_like(x)
+    deltas[:, 1:, :] = x[:, 1:, :] - x[:, :-1, :]
+    return np.concatenate([x, deltas], axis=-1)
+
+
+def build_lstm_motion_model(
+    input_shape: tuple[int, int],
+    num_classes: int,
+    learning_rate: float,
+) -> keras.Model:
+    """Build the motion-aware LSTM baseline architecture."""
+    model = keras.Sequential(
+        [
+            keras.layers.Input(shape=input_shape),
+            keras.layers.Masking(mask_value=0.0),
+            keras.layers.LSTM(128),
+            keras.layers.Dropout(0.2),
+            keras.layers.Dense(64, activation="relu"),
+            keras.layers.Dense(num_classes, activation="softmax"),
+        ]
+    )
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    return model
+
+
 def save_tiny_overfit_history(history: keras.callbacks.History, reports_dir: Path) -> None:
     """Save tiny-overfit history using dedicated filenames."""
     save_tiny_overfit_history_for_model(history=history, reports_dir=reports_dir, tiny_model_type="lstm")
@@ -248,10 +291,10 @@ def parse_args() -> argparse.Namespace:
         "--model-type",
         type=str,
         default="lstm",
-        choices=["lstm", "mlp"],
+        choices=["lstm", "mlp", "lstm_motion"],
         help=(
             "Model architecture for normal full-dataset training mode. "
-            "Use 'lstm' (default) or 'mlp'."
+            "Use 'lstm' (default), 'mlp', or 'lstm_motion'."
         ),
     )
     parser.add_argument(
@@ -628,7 +671,7 @@ def main() -> None:
                 save_best_only=True,
             ),
         ]
-    else:
+    elif args.model_type == "mlp":
         epochs = int(get_training_value(config, "epochs", 100))
         # MLP baseline:
         # - flatten each sample from (90, 30) into 2700 features
@@ -647,6 +690,42 @@ def main() -> None:
         )
         checkpoint_path = checkpoints_dir / "best_mlp.keras"
         filename_prefix = "mlp_"
+        callbacks = [
+            keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
+            keras.callbacks.ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=0.5,
+                patience=4,
+                min_lr=1e-6,
+            ),
+            keras.callbacks.ModelCheckpoint(
+                filepath=str(checkpoint_path),
+                monitor="val_loss",
+                save_best_only=True,
+            ),
+        ]
+    else:
+        # Motion-aware LSTM baseline:
+        # - keeps original processed X.npy untouched
+        # - derives explicit motion (frame-to-frame deltas) during training
+        epochs = 100
+        x_motion = build_motion_aware_sequences(x)
+        x_train_model = x_motion[train_idx]
+        x_val_model = x_motion[val_idx]
+        x_test_model = x_motion[test_idx]
+
+        print("\n=== Input Representation ===")
+        print("Representation: position + delta (motion-aware)")
+        print(f"Original per-sample shape: {x.shape[1:]}")
+        print(f"Motion-aware per-sample shape: {x_train_model.shape[1:]}")
+
+        model = build_lstm_motion_model(
+            input_shape=(x_train_model.shape[1], x_train_model.shape[2]),
+            num_classes=9,
+            learning_rate=learning_rate,
+        )
+        checkpoint_path = checkpoints_dir / "best_lstm_motion.keras"
+        filename_prefix = "lstm_motion_"
         callbacks = [
             keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
             keras.callbacks.ReduceLROnPlateau(
