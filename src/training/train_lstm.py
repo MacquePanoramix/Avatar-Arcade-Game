@@ -272,6 +272,11 @@ def parse_args() -> argparse.Namespace:
             "Use 'lstm' (default) or 'mlp'."
         ),
     )
+    parser.add_argument(
+        "--force-resplit",
+        action="store_true",
+        help="Always regenerate train/val/test split indices and overwrite saved split files.",
+    )
     return parser.parse_args()
 
 
@@ -375,32 +380,75 @@ def load_or_create_split_indices(
     y: np.ndarray,
     splits_dir: Path,
     random_state: int,
+    force_resplit: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Load existing split indices when available; otherwise create and save them."""
+    """Load valid split indices when available; otherwise create and save them."""
     train_idx_path = splits_dir / "train_indices.npy"
     val_idx_path = splits_dir / "val_indices.npy"
     test_idx_path = splits_dir / "test_indices.npy"
 
     split_files_exist = train_idx_path.exists() and val_idx_path.exists() and test_idx_path.exists()
+    dataset_size = len(y)
 
-    if split_files_exist:
-        print("\nUsing existing saved split indices from data/splits for fair comparison.")
-        train_idx = np.load(train_idx_path)
-        val_idx = np.load(val_idx_path)
-        test_idx = np.load(test_idx_path)
-    else:
-        print("\nNo saved split indices found. Creating new 70/15/15 stratified split.")
+    def validate_saved_splits(
+        train_idx: np.ndarray,
+        val_idx: np.ndarray,
+        test_idx: np.ndarray,
+    ) -> tuple[bool, str]:
+        split_names_and_indices = [("train", train_idx), ("validation", val_idx), ("test", test_idx)]
+
+        for split_name, split_idx in split_names_and_indices:
+            if len(split_idx) == 0:
+                return False, f"{split_name} split is empty"
+            if np.any(split_idx < 0):
+                return False, f"{split_name} split contains negative indices"
+            if np.any(split_idx >= dataset_size):
+                return False, f"{split_name} split contains out-of-bounds indices for dataset size {dataset_size}"
+
+        combined = np.concatenate([train_idx, val_idx, test_idx])
+        unique_indices = np.unique(combined)
+
+        if len(unique_indices) != dataset_size:
+            return (
+                False,
+                f"unique index count across splits ({len(unique_indices)}) does not match dataset size ({dataset_size})",
+            )
+        if len(combined) != len(unique_indices):
+            return False, "duplicate indices found across train/validation/test splits"
+
+        return True, ""
+
+    def create_and_save_new_splits() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         # We pass x as a placeholder array because the split helper uses y-based stratification.
         x_placeholder = np.zeros((len(y), 1))
-        train_idx, val_idx, test_idx = split_data_stratified(
+        train_idx_new, val_idx_new, test_idx_new = split_data_stratified(
             x=x_placeholder,
             y=y,
             random_state=random_state,
         )
+        np.save(train_idx_path, train_idx_new)
+        np.save(val_idx_path, val_idx_new)
+        np.save(test_idx_path, test_idx_new)
+        return train_idx_new, val_idx_new, test_idx_new
 
-        np.save(train_idx_path, train_idx)
-        np.save(val_idx_path, val_idx)
-        np.save(test_idx_path, test_idx)
+    if split_files_exist and not force_resplit:
+        train_idx = np.load(train_idx_path)
+        val_idx = np.load(val_idx_path)
+        test_idx = np.load(test_idx_path)
+
+        is_valid, reason = validate_saved_splits(train_idx, val_idx, test_idx)
+        if is_valid:
+            print("\nUsing valid existing split indices")
+        else:
+            print(f"\nWarning: {reason}")
+            print("Saved splits are stale/invalid; regenerating new splits")
+            train_idx, val_idx, test_idx = create_and_save_new_splits()
+    else:
+        if force_resplit and split_files_exist:
+            print("\n--force-resplit provided; regenerating train/val/test splits")
+        else:
+            print("\nNo saved split indices found. Creating new 70/15/15 stratified split.")
+        train_idx, val_idx, test_idx = create_and_save_new_splits()
 
     return train_idx, val_idx, test_idx
 
@@ -545,6 +593,7 @@ def main() -> None:
         y=y,
         splits_dir=splits_dir,
         random_state=random_seed,
+        force_resplit=args.force_resplit,
     )
 
     x_train, y_train = x[train_idx], y[train_idx]
