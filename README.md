@@ -136,13 +136,24 @@ The command writes:
 - Repairs bad frames by copy-forward (and future-fill for bad leading frames).
 - If a whole take has no valid frames, fills the sample with zeros and records that in metadata.
 
-## First LSTM training run
+## Baseline training runs (LSTM + MLP)
 
-Use this command to train the first baseline LSTM model on already preprocessed OpenPose data:
+Run the normal full-dataset **LSTM baseline** (default):
 
 ```bash
-python -m src.training.train_lstm
+python -m src.training.train_lstm --model-type lstm
 ```
+
+Run the normal full-dataset **MLP baseline**:
+
+```bash
+python -m src.training.train_lstm --model-type mlp
+```
+
+MLP note:
+
+- Each sample is flattened from `(90, 30)` into `2700` input features before classification.
+- The script reuses the same saved split files in `data/splits/*.npy` (when present) so LSTM vs MLP comparisons stay fair.
 
 Expected processed inputs (must already exist):
 
@@ -153,12 +164,10 @@ Expected processed inputs (must already exist):
 
 Main outputs are saved to:
 
-- `models/checkpoints/best_lstm.keras`
-- `models/reports/training_history.csv`
-- `models/reports/training_history.png`
-- `models/reports/classification_report.txt`
-- `models/reports/confusion_matrix.csv`
-- `models/reports/test_predictions.csv`
+- LSTM checkpoint: `models/checkpoints/best_lstm.keras`
+- MLP checkpoint: `models/checkpoints/best_mlp.keras`
+- LSTM reports: `models/reports/training_history.csv`, `models/reports/training_history.png`, `models/reports/classification_report.txt`, `models/reports/confusion_matrix.csv`, `models/reports/test_predictions.csv`
+- MLP reports: `models/reports/mlp_training_history.csv`, `models/reports/mlp_training_history.png`, `models/reports/mlp_classification_report.txt`, `models/reports/mlp_confusion_matrix.csv`, `models/reports/mlp_test_predictions.csv`
 - `data/splits/train_indices.npy`
 - `data/splits/val_indices.npy`
 - `data/splits/test_indices.npy`
