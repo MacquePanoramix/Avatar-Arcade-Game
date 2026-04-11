@@ -156,37 +156,6 @@ def build_lstm_model(
     return model
 
 
-def save_history(history: keras.callbacks.History, reports_dir: Path) -> None:
-    """Save training history to CSV and PNG plot."""
-    history_df = pd.DataFrame(history.history)
-    history_csv_path = reports_dir / "training_history.csv"
-    history_df.to_csv(history_csv_path, index=False)
-
-    plt.figure(figsize=(10, 4))
-
-    # Left plot: loss curves.
-    plt.subplot(1, 2, 1)
-    plt.plot(history.history.get("loss", []), label="loss")
-    plt.plot(history.history.get("val_loss", []), label="val_loss")
-    plt.title("Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-
-    # Right plot: accuracy curves.
-    plt.subplot(1, 2, 2)
-    plt.plot(history.history.get("accuracy", []), label="accuracy")
-    plt.plot(history.history.get("val_accuracy", []), label="val_accuracy")
-    plt.title("Accuracy")
-    plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig(reports_dir / "training_history.png", dpi=150)
-    plt.close()
-
-
 def save_tiny_overfit_history(history: keras.callbacks.History, reports_dir: Path) -> None:
     """Save tiny-overfit history using dedicated filenames."""
     save_tiny_overfit_history_for_model(history=history, reports_dir=reports_dir, tiny_model_type="lstm")
@@ -276,6 +245,16 @@ def parse_args() -> argparse.Namespace:
     """Parse optional CLI flags for training modes."""
     parser = argparse.ArgumentParser(description="Train baseline LSTM for Avatar Arcade data.")
     parser.add_argument(
+        "--model-type",
+        type=str,
+        default="lstm",
+        choices=["lstm", "mlp"],
+        help=(
+            "Model architecture for normal full-dataset training mode. "
+            "Use 'lstm' (default) or 'mlp'."
+        ),
+    )
+    parser.add_argument(
         "--tiny-overfit",
         action="store_true",
         help=(
@@ -301,6 +280,7 @@ def save_test_reports(
     y_pred: np.ndarray,
     label_map: dict[str, Any],
     reports_dir: Path,
+    filename_prefix: str = "",
 ) -> None:
     """Save classification report, confusion matrix, and per-sample predictions."""
     id_to_name = {int(v): k for k, v in label_map.get("label_to_id", {}).items()}
@@ -316,11 +296,11 @@ def save_test_reports(
         digits=4,
         zero_division=0,
     )
-    (reports_dir / "classification_report.txt").write_text(report_text, encoding="utf-8")
+    (reports_dir / f"{filename_prefix}classification_report.txt").write_text(report_text, encoding="utf-8")
 
     cm = confusion_matrix(y_test, y_pred, labels=labels_sorted)
     cm_df = pd.DataFrame(cm, index=target_names, columns=target_names)
-    cm_df.to_csv(reports_dir / "confusion_matrix.csv")
+    cm_df.to_csv(reports_dir / f"{filename_prefix}confusion_matrix.csv")
 
     predictions_df = pd.DataFrame(
         {
@@ -330,8 +310,99 @@ def save_test_reports(
             "pred_label": [id_to_name.get(int(v), f"class_{int(v)}") for v in y_pred],
         }
     )
-    predictions_df.to_csv(reports_dir / "test_predictions.csv", index=False)
+    predictions_df.to_csv(reports_dir / f"{filename_prefix}test_predictions.csv", index=False)
 
+
+def save_history(
+    history: keras.callbacks.History,
+    reports_dir: Path,
+    filename_prefix: str = "",
+) -> None:
+    """Save training history to CSV and PNG plot."""
+    history_df = pd.DataFrame(history.history)
+    history_csv_path = reports_dir / f"{filename_prefix}training_history.csv"
+    history_df.to_csv(history_csv_path, index=False)
+
+    plt.figure(figsize=(10, 4))
+
+    # Left plot: loss curves.
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history.get("loss", []), label="loss")
+    plt.plot(history.history.get("val_loss", []), label="val_loss")
+    plt.title("Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    # Right plot: accuracy curves.
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history.get("accuracy", []), label="accuracy")
+    plt.plot(history.history.get("val_accuracy", []), label="val_accuracy")
+    plt.title("Accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(reports_dir / f"{filename_prefix}training_history.png", dpi=150)
+    plt.close()
+
+
+def build_mlp_model(
+    input_dim: int,
+    num_classes: int,
+    learning_rate: float,
+) -> keras.Model:
+    """Build a simple full-dataset MLP baseline on flattened sequence features."""
+    model = keras.Sequential(
+        [
+            keras.layers.Input(shape=(input_dim,)),
+            keras.layers.Dense(256, activation="relu"),
+            keras.layers.Dense(128, activation="relu"),
+            keras.layers.Dense(num_classes, activation="softmax"),
+        ]
+    )
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    return model
+
+
+def load_or_create_split_indices(
+    y: np.ndarray,
+    splits_dir: Path,
+    random_state: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load existing split indices when available; otherwise create and save them."""
+    train_idx_path = splits_dir / "train_indices.npy"
+    val_idx_path = splits_dir / "val_indices.npy"
+    test_idx_path = splits_dir / "test_indices.npy"
+
+    split_files_exist = train_idx_path.exists() and val_idx_path.exists() and test_idx_path.exists()
+
+    if split_files_exist:
+        print("\nUsing existing saved split indices from data/splits for fair comparison.")
+        train_idx = np.load(train_idx_path)
+        val_idx = np.load(val_idx_path)
+        test_idx = np.load(test_idx_path)
+    else:
+        print("\nNo saved split indices found. Creating new 70/15/15 stratified split.")
+        # We pass x as a placeholder array because the split helper uses y-based stratification.
+        x_placeholder = np.zeros((len(y), 1))
+        train_idx, val_idx, test_idx = split_data_stratified(
+            x=x_placeholder,
+            y=y,
+            random_state=random_state,
+        )
+
+        np.save(train_idx_path, train_idx)
+        np.save(val_idx_path, val_idx)
+        np.save(test_idx_path, test_idx)
+
+    return train_idx, val_idx, test_idx
 
 def main() -> None:
     """Run full first-baseline training flow."""
@@ -467,11 +538,14 @@ def main() -> None:
         )
         return
 
-    train_idx, val_idx, test_idx = split_data_stratified(x, y, random_state=random_seed)
+    print("\n=== Full Dataset Training Mode ===")
+    print(f"Model type used: {args.model_type}")
 
-    np.save(splits_dir / "train_indices.npy", train_idx)
-    np.save(splits_dir / "val_indices.npy", val_idx)
-    np.save(splits_dir / "test_indices.npy", test_idx)
+    train_idx, val_idx, test_idx = load_or_create_split_indices(
+        y=y,
+        splits_dir=splits_dir,
+        random_state=random_seed,
+    )
 
     x_train, y_train = x[train_idx], y[train_idx]
     x_val, y_val = x[val_idx], y[val_idx]
@@ -486,41 +560,68 @@ def main() -> None:
     print_split_summary("Validation", y_val, label_map)
     print_split_summary("Test", y_test, label_map)
 
-    # Baseline architecture requested in the task.
-    model = build_lstm_model(
-        input_shape=(x.shape[1], x.shape[2]),
-        num_classes=9,
-        lstm_units=lstm_units,
-        learning_rate=learning_rate,
-    )
+    if args.model_type == "lstm":
+        # Keep existing LSTM behavior unchanged in normal mode.
+        model = build_lstm_model(
+            input_shape=(x.shape[1], x.shape[2]),
+            num_classes=9,
+            lstm_units=lstm_units,
+            learning_rate=learning_rate,
+        )
+        x_train_model, x_val_model, x_test_model = x_train, x_val, x_test
+        checkpoint_path = checkpoints_dir / "best_lstm.keras"
+        filename_prefix = ""
+    else:
+        # MLP baseline:
+        # - flatten each sample from (90, 30) into 2700 features
+        # - train and evaluate with the exact same split indices as LSTM
+        x_train_model = x_train.reshape(x_train.shape[0], -1)
+        x_val_model = x_val.reshape(x_val.shape[0], -1)
+        x_test_model = x_test.reshape(x_test.shape[0], -1)
+        print(
+            f"MLP flattening: each sample {x.shape[1:]} -> "
+            f"{x_train_model.shape[1]} features"
+        )
+        model = build_mlp_model(
+            input_dim=x_train_model.shape[1],
+            num_classes=9,
+            learning_rate=learning_rate,
+        )
+        checkpoint_path = checkpoints_dir / "best_mlp.keras"
+        filename_prefix = "mlp_"
 
     print("\n=== Model Summary ===")
     model.summary()
 
-    checkpoint_path = checkpoints_dir / "best_lstm.keras"
     callbacks = [
         keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True),
         keras.callbacks.ModelCheckpoint(filepath=str(checkpoint_path), monitor="val_loss", save_best_only=True),
     ]
 
     history = model.fit(
-        x_train,
+        x_train_model,
         y_train,
-        validation_data=(x_val, y_val),
+        validation_data=(x_val_model, y_val),
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
         verbose=1,
     )
 
-    val_loss, val_acc = model.evaluate(x_val, y_val, verbose=0)
-    test_loss, test_acc = model.evaluate(x_test, y_test, verbose=0)
+    val_loss, val_acc = model.evaluate(x_val_model, y_val, verbose=0)
+    test_loss, test_acc = model.evaluate(x_test_model, y_test, verbose=0)
 
-    y_pred_probs = model.predict(x_test, verbose=0)
+    y_pred_probs = model.predict(x_test_model, verbose=0)
     y_pred = np.argmax(y_pred_probs, axis=1)
 
-    save_history(history, reports_dir)
-    save_test_reports(y_test=y_test, y_pred=y_pred, label_map=label_map, reports_dir=reports_dir)
+    save_history(history, reports_dir, filename_prefix=filename_prefix)
+    save_test_reports(
+        y_test=y_test,
+        y_pred=y_pred,
+        label_map=label_map,
+        reports_dir=reports_dir,
+        filename_prefix=filename_prefix,
+    )
 
     print("\n=== Final Metrics ===")
     print(f"Validation accuracy: {val_acc:.4f} (loss: {val_loss:.4f})")
@@ -528,11 +629,11 @@ def main() -> None:
 
     print("\n=== Saved Outputs ===")
     print(f"- Best checkpoint: {checkpoint_path}")
-    print(f"- Training history CSV: {reports_dir / 'training_history.csv'}")
-    print(f"- Training history plot: {reports_dir / 'training_history.png'}")
-    print(f"- Classification report: {reports_dir / 'classification_report.txt'}")
-    print(f"- Confusion matrix CSV: {reports_dir / 'confusion_matrix.csv'}")
-    print(f"- Test predictions CSV: {reports_dir / 'test_predictions.csv'}")
+    print(f"- Training history CSV: {reports_dir / f'{filename_prefix}training_history.csv'}")
+    print(f"- Training history plot: {reports_dir / f'{filename_prefix}training_history.png'}")
+    print(f"- Classification report: {reports_dir / f'{filename_prefix}classification_report.txt'}")
+    print(f"- Confusion matrix CSV: {reports_dir / f'{filename_prefix}confusion_matrix.csv'}")
+    print(f"- Test predictions CSV: {reports_dir / f'{filename_prefix}test_predictions.csv'}")
     print(f"- Split indices: {splits_dir / 'train_indices.npy'}, {splits_dir / 'val_indices.npy'}, {splits_dir / 'test_indices.npy'}")
 
 
