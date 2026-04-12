@@ -52,7 +52,28 @@ SUITES: dict[str, list[ExperimentSpec]] = {
             model_type="mlp",
             tiny_overfit=True,
         ),
-    ]
+    ],
+    "motion_followup": [
+        ExperimentSpec("full_mlp", ["--model-type", "mlp"], model_type="mlp", tiny_overfit=False),
+        ExperimentSpec(
+            "full_mlp_motion",
+            ["--model-type", "mlp_motion"],
+            model_type="mlp_motion",
+            tiny_overfit=False,
+        ),
+        ExperimentSpec(
+            "full_lstm_motion_valacc",
+            ["--model-type", "lstm_motion", "--checkpoint-monitor", "val_accuracy"],
+            model_type="lstm_motion",
+            tiny_overfit=False,
+        ),
+        ExperimentSpec(
+            "full_gru_motion",
+            ["--model-type", "gru_motion"],
+            model_type="gru_motion",
+            tiny_overfit=False,
+        ),
+    ],
 }
 
 
@@ -132,9 +153,12 @@ def write_summary_files(suite_root: Path, rows: list[dict[str, Any]]) -> None:
         "experiment_name",
         "status",
         "model_type",
+        "input_representation",
         "tiny_overfit",
         "dataset_shape",
         "split_sizes",
+        "checkpoint_monitor",
+        "best_epoch_by_monitor",
         "epochs_requested",
         "epochs_run",
         "final_train_accuracy",
@@ -267,9 +291,12 @@ def main() -> None:
             "experiment_name": spec.name,
             "status": "success" if completed.returncode == 0 else "failed",
             "model_type": spec.model_type,
+            "input_representation": metrics.get("input_representation"),
             "tiny_overfit": spec.tiny_overfit,
             "dataset_shape": metrics.get("dataset_shape"),
             "split_sizes": metrics.get("split_sizes"),
+            "checkpoint_monitor": metrics.get("checkpoint_monitor"),
+            "best_epoch_by_monitor": metrics.get("best_epoch_by_monitor"),
             "epochs_requested": metrics.get("epochs_requested"),
             "epochs_run": metrics.get("epochs_run"),
             "final_train_accuracy": metrics.get("final_train_accuracy"),

@@ -206,6 +206,25 @@ Per-experiment artifacts now include run-local files such as:
 - `metrics.json`
 - training history and confusion matrix files supported by the selected model mode
 
+### Motion follow-up suite (feature vs recurrence question)
+
+To run the next comparison round on one shared full-data split:
+
+```bash
+python -m src.training.run_experiment_suite --suite motion_followup --force-resplit
+```
+
+This suite runs:
+
+- `full_mlp`
+- `full_mlp_motion`
+- `full_lstm_motion_valacc` (uses `--checkpoint-monitor val_accuracy`)
+- `full_gru_motion`
+
+Outputs are written to a timestamped folder under:
+
+- `models/experiment_runs/YYYYMMDD_HHMMSS/`
+
 Project journey document for report writing:
 
 - `docs/project_journey.md`

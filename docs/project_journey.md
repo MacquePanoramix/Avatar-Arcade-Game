@@ -131,3 +131,26 @@ d36876f Add optional continuous review video and cycle manifest
 ```
 
 Short appendix summary: recent history shows a clear progression from capture/preprocessing stabilization to split correctness hardening, then MLP baseline strength, while sequence-model variants are still under active iteration.
+
+## Follow-up experiment round: motion-feature comparison
+
+The strongest current reference remains **full_mlp** (about 91.30% test accuracy on the corrected full dataset).  
+At this stage, plain `full_lstm` is not the priority because it still underperforms substantially.  
+However, `full_lstm_motion` is now interesting because it rose above chance-level and tiny-overfit checks indicate the sequence path can learn.
+
+This reframes the next question:
+
+**Does motion help because the feature representation is better, or only when combined with recurrence?**
+
+To answer that cleanly, the next round compares:
+
+- `mlp_motion` (same pose+delta features, flattened into an MLP)
+- `lstm_motion` with checkpoint selection by `val_accuracy` for rerun stability
+- `gru_motion` (same motion features, alternative recurrent cell)
+- and keeps `full_mlp` in the suite as the practical baseline anchor
+
+### What each outcome would mean
+
+- If `mlp_motion` beats `full_mlp`, then motion features themselves are useful even without recurrence.
+- If `mlp_motion` does not improve but `gru_motion` (or `lstm_motion` with val-accuracy checkpointing) improves, recurrence may be extracting meaningful temporal structure.
+- If neither motion MLP nor motion recurrent models beat `full_mlp`, the flattened pose baseline remains the practical best model for now.
