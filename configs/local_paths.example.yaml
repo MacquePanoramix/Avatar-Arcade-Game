@@ -1,0 +1,14 @@
+# Local-only runtime config for one-command live OpenPose + classifier launch.
+# Copy this file to configs/local_paths.yaml and edit the values for your machine.
+
+# Required: full path to your external OpenPoseDemo.exe (repo does not bundle OpenPose binaries)
+openpose_demo_exe: "C:/openpose/bin/OpenPoseDemo.exe"
+
+# Optional: OpenPose model folder path. If blank, launcher will not pass --model_folder.
+openpose_models_dir: "C:/openpose/models"
+
+# Optional: JSON output folder. Relative paths resolve from repo root.
+live_json_dir: "data/raw/live_buffer/openpose_session/live_test"
+
+# Optional: camera index/name passed through as --camera
+# openpose_camera: 0
