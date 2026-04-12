@@ -48,6 +48,7 @@ class RuntimeFrameResult:
 
     features_30: np.ndarray
     was_repaired_frame: bool
+    had_joint_repair: bool
     suspicious_jump: bool
     used_prev_frame_copy: bool
     missing_joint_count: int
@@ -221,6 +222,7 @@ class RuntimePreprocessor:
             return RuntimeFrameResult(
                 features_30=features,
                 was_repaired_frame=True,
+                had_joint_repair=False,
                 suspicious_jump=False,
                 used_prev_frame_copy=True,
                 missing_joint_count=NUM_JOINTS,
@@ -233,6 +235,7 @@ class RuntimePreprocessor:
             return RuntimeFrameResult(
                 features_30=features,
                 was_repaired_frame=True,
+                had_joint_repair=False,
                 suspicious_jump=False,
                 used_prev_frame_copy=True,
                 missing_joint_count=NUM_JOINTS,
@@ -258,6 +261,7 @@ class RuntimePreprocessor:
             return RuntimeFrameResult(
                 features_30=features,
                 was_repaired_frame=True,
+                had_joint_repair=False,
                 suspicious_jump=True,
                 used_prev_frame_copy=True,
                 missing_joint_count=NUM_JOINTS,
@@ -286,6 +290,7 @@ class RuntimePreprocessor:
         return RuntimeFrameResult(
             features_30=repaired.reshape(FEATURES_PER_FRAME).astype(np.float32),
             was_repaired_frame=missing_joint_count > 0,
+            had_joint_repair=missing_joint_count > 0,
             suspicious_jump=False,
             used_prev_frame_copy=False,
             missing_joint_count=missing_joint_count,

@@ -350,3 +350,56 @@ This keeps live behavior conceptually aligned with the offline normalization int
   - shows raw + smoothed prediction and top-3 probabilities,
   - prints repair/debug state and buffer fill,
   - logs inference rows to CSV for later review.
+
+## Live debug inference reporting refinement (v2)
+
+The first real replay run validated that v1 was functionally correct (model/label-map/JSON stream loading, 90-frame warmup, rolling inference, and expected smoothing lag), but it also exposed an interpretation problem in the status output.
+
+### What was confusing in v1 output
+
+- `repair=True` appeared on most frames and looked like severe failure even when only a few joints were missing.
+- In runtime preprocessing, `repair=True` actually represented broad "some repair happened" semantics, not specifically catastrophic frame fallback.
+- This blurred together minor and major cases:
+  - minor: partial joint-level fills (`missing_joint_count > 0`),
+  - major: full frame copy-forward fallback (`used_prev_frame_copy=True`),
+  - major + likely unstable tracking: `suspicious_jump=True`.
+
+### Why refinement was needed
+
+The replay log was useful, but status semantics were too noisy to trust at a glance.
+For live/replay debugging, we need to immediately distinguish:
+
+- routine partial-joint recovery,
+- whole-frame fallback events,
+- suspicious-jump-triggered protection behavior.
+
+Without that distinction, operators can misread healthy-but-noisy streams as catastrophic instability.
+
+### What changed in v2
+
+- Runtime frame metadata now explicitly includes `had_joint_repair` in addition to existing flags.
+- Live console status was compacted and clarified to show:
+  - `joints_missing`,
+  - `joint_repair` (yes/no),
+  - `prev_copy` (yes/no),
+  - `suspicious_jump` (yes/no),
+  with stronger visual emphasis (`!!`) for major fallback cases.
+- Added optional console noise controls:
+  - `--print-every-n`
+  - `--quiet-warmup`
+- CSV logging now carries clearer repair semantics with `had_joint_repair` while retaining prior compatibility columns.
+- Added end-of-run summary (printed + JSON artifact) with:
+  - frame totals (total/warmup/inference),
+  - repair/fallback counts,
+  - missing-joint stats (avg/min/max),
+  - raw and smoothed class-count histograms,
+  - top raw->smoothed disagreement patterns for quick confusion inspection.
+
+### Replay behavior takeaway after refinement
+
+The replay test continues to show realistic temporal behavior:
+
+- smoothing adds expected lag on transitions,
+- recurring boundary confusion (notably `attack_earth` vs `defense_water`) is visible and now easier to quantify post-run,
+- minor joint repair is common and mostly non-catastrophic,
+- serious fallback events can now be isolated clearly for targeted debugging instead of being hidden inside generic `repair=True`.
