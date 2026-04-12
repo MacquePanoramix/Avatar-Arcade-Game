@@ -403,3 +403,49 @@ The replay test continues to show realistic temporal behavior:
 - recurring boundary confusion (notably `attack_earth` vs `defense_water`) is visible and now easier to quantify post-run,
 - minor joint repair is common and mostly non-catastrophic,
 - serious fallback events can now be isolated clearly for targeted debugging instead of being hidden inside generic `repair=True`.
+
+## Runtime live-selection refactor: stable person assignment groundwork
+
+Live replay analysis showed repeated suspicious-jump and previous-frame-copy fallback segments during inference, even when camera conditions looked acceptable.
+One likely contributor was person selection fragility: the runtime path always took `people[0]`, which can wobble when OpenPose detection ordering changes frame to frame.
+
+That behavior is risky for current single-person debugging and even more risky for the final two-player game plan, where two real users share one camera frame and must remain mapped to stable logical identities:
+
+- player 1 = left-side player
+- player 2 = right-side player
+
+### What changed in runtime selection
+
+A lightweight deterministic assignment/tracking layer was added to runtime preprocessing.
+The parser now evaluates *all* detected people each frame (not only the first), and computes per-candidate signals used for matching:
+
+- center anchor (Neck preferred, MidHip fallback)
+- weighted body scale estimate
+- usable joint count
+- mean usable-joint confidence
+
+Two tracking modes are now supported:
+
+1. `single_person` (default)
+   - on startup, picks the best-quality candidate
+   - afterward, matches to the previously tracked person by temporal consistency (center distance + scale similarity + quality tie-break)
+
+2. `two_player_left_right` (future-facing groundwork)
+   - keeps separate `left` and `right` tracked states
+   - initializes from x-ordering when both are first seen
+   - later frames use temporal assignment costs with a weak crossing penalty so identities do not instantly flip on jitter
+
+Current live debug inference still runs one classifier stream, but assignment now exposes left/right selected detection indices and notes, so wiring two independent gameplay/controller streams is straightforward in a follow-up step.
+
+### Why this is the current takeaway
+
+- The runtime path no longer blindly trusts OpenPose detection index ordering.
+- Identity consistency is explicitly part of selection heuristics now.
+- This reduces one known risk factor for fallback-heavy debug runs.
+- It also aligns runtime architecture with the final two-player camera requirement.
+
+### Remaining limitations
+
+- This is intentionally heuristic and lightweight, not a full multi-object tracker.
+- Extended long occlusions or full person crossings may still require stronger identity logic later.
+- Two-player mode currently prepares assignment/state/debug output, but does not yet run separate model windows/classifiers per player.

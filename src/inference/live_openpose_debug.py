@@ -70,6 +70,13 @@ def parse_args() -> argparse.Namespace:
         help="Weak confidence cutoff for runtime joint usability.",
     )
     parser.add_argument(
+        "--tracking-mode",
+        type=str,
+        choices=["single_person", "two_player_left_right"],
+        default="single_person",
+        help="Runtime person assignment mode (default: single_person).",
+    )
+    parser.add_argument(
         "--max-idle-polls",
         type=int,
         default=0,
@@ -141,7 +148,10 @@ def main() -> None:
     num_classes = len(id_to_label)
 
     model = keras.models.load_model(model_path)
-    preprocessor = RuntimePreprocessor(confidence_cutoff=args.confidence_cutoff)
+    preprocessor = RuntimePreprocessor(
+        confidence_cutoff=args.confidence_cutoff,
+        tracking_mode=args.tracking_mode,
+    )
 
     rolling: deque[np.ndarray] = deque(maxlen=SEQUENCE_LENGTH)
     ema_probs: np.ndarray | None = None
@@ -170,6 +180,12 @@ def main() -> None:
             "used_prev_frame_copy",
             "suspicious_jump",
             "missing_joint_count",
+            "detected_people_count",
+            "tracking_mode",
+            "selected_person_index",
+            "selected_left_person_index",
+            "selected_right_person_index",
+            "tracking_note",
             "intended_label",
         ],
     )
@@ -181,6 +197,7 @@ def main() -> None:
     print(f"Label map: {label_map_path}")
     print(f"CSV log: {log_csv_path}")
     print(f"Summary: {summary_path}")
+    print(f"Tracking mode: {args.tracking_mode}")
     print("Press Ctrl+C to stop.\n")
 
     total_frames = 0
@@ -251,7 +268,9 @@ def main() -> None:
                             f"[warmup {fill:>2}/{SEQUENCE_LENGTH}] frame={frame_path.name} "
                             f"| miss={missing_joints:>2} joint_fix={'Y' if frame_result.had_joint_repair else 'N'} "
                             f"prev_copy={'Y' if frame_result.used_prev_frame_copy else 'N'} "
-                            f"susp={'Y' if frame_result.suspicious_jump else 'N'}"
+                            f"susp={'Y' if frame_result.suspicious_jump else 'N'} "
+                            f"people={frame_result.detected_people_count:>2} "
+                            f"sel={frame_result.selected_person_index}"
                         )
                     writer.writerow(
                         {
@@ -271,6 +290,12 @@ def main() -> None:
                             "used_prev_frame_copy": int(frame_result.used_prev_frame_copy),
                             "suspicious_jump": int(frame_result.suspicious_jump),
                             "missing_joint_count": missing_joints,
+                            "detected_people_count": frame_result.detected_people_count,
+                            "tracking_mode": frame_result.tracking_mode,
+                            "selected_person_index": frame_result.selected_person_index,
+                            "selected_left_person_index": frame_result.selected_left_person_index,
+                            "selected_right_person_index": frame_result.selected_right_person_index,
+                            "tracking_note": frame_result.tracking_note,
                             "intended_label": "",
                         }
                     )
@@ -305,14 +330,19 @@ def main() -> None:
                     severity = "!!" if frame_result.used_prev_frame_copy or frame_result.suspicious_jump else "--"
                     print(
                         f"{severity} frame={frame_path.name} | raw={raw_label} | smooth={smoothed_label} "
-                        f"| top3: {compact_top3(raw_probs, id_to_label=id_to_label, top_k=3)}"
+                        f"| top3: {compact_top3(raw_probs, id_to_label=id_to_label, top_k=3)} "
+                        f"| people={frame_result.detected_people_count} "
+                        f"sel={frame_result.selected_person_index} "
+                        f"L={frame_result.selected_left_person_index} "
+                        f"R={frame_result.selected_right_person_index}"
                     )
                     print(
                         "   status: "
                         f"joints_missing={missing_joints} "
                         f"joint_repair={'yes' if frame_result.had_joint_repair else 'no'} "
                         f"prev_copy={'yes' if frame_result.used_prev_frame_copy else 'no'} "
-                        f"suspicious_jump={'yes' if frame_result.suspicious_jump else 'no'}"
+                        f"suspicious_jump={'yes' if frame_result.suspicious_jump else 'no'} "
+                        f"tracking_note={frame_result.tracking_note}"
                     )
 
                 top3 = np.argsort(raw_probs)[-3:][::-1]
@@ -334,6 +364,12 @@ def main() -> None:
                         "used_prev_frame_copy": int(frame_result.used_prev_frame_copy),
                         "suspicious_jump": int(frame_result.suspicious_jump),
                         "missing_joint_count": missing_joints,
+                        "detected_people_count": frame_result.detected_people_count,
+                        "tracking_mode": frame_result.tracking_mode,
+                        "selected_person_index": frame_result.selected_person_index,
+                        "selected_left_person_index": frame_result.selected_left_person_index,
+                        "selected_right_person_index": frame_result.selected_right_person_index,
+                        "tracking_note": frame_result.tracking_note,
                         "intended_label": "",
                     }
                 )
@@ -345,6 +381,7 @@ def main() -> None:
         avg_missing_joints = (missing_joint_sum / total_frames) if total_frames > 0 else 0.0
         summary_payload: dict[str, Any] = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "tracking_mode": args.tracking_mode,
             "total_frames_processed": total_frames,
             "warmup_frames": warmup_frames,
             "inference_frames": inference_frames,
