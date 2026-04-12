@@ -51,3 +51,6 @@ models/exported/*.h5
 models/exported/*.keras
 models/reports/*.json
 models/reports/*.txt
+
+# Local machine runtime overrides
+configs/local_paths.yaml

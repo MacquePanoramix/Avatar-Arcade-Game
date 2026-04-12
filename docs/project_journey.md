@@ -449,3 +449,33 @@ Current live debug inference still runs one classifier stream, but assignment no
 - This is intentionally heuristic and lightweight, not a full multi-object tracker.
 - Extended long occlusions or full person crossings may still require stronger identity logic later.
 - Two-player mode currently prepares assignment/state/debug output, but does not yet run separate model windows/classifiers per player.
+
+## Live OpenPose + classifier one-command launcher (Windows-first)
+
+### Step 1: local external-path config design
+- **Attempted:** Added a local runtime-config pattern for external OpenPose path wiring.
+- **Why:** This repository does not bundle OpenPose binaries, so hardcoded machine paths in tracked files would break portability.
+- **Observed:** Existing repo config (`configs/paths.yaml`) is project-level and not suitable for user-specific executable paths.
+- **Changed:** Added tracked template `configs/local_paths.example.yaml` and local-only override target `configs/local_paths.yaml` (gitignored).
+- **Takeaway:** Keeping machine-specific paths in an untracked local file enables reliable one-command startup without polluting shared config.
+
+### Step 2: one-command orchestration script
+- **Attempted:** Implemented `tools/live/start_live_debug.ps1` to launch OpenPose and the Python live debug classifier in one flow.
+- **Why:** Real live testing previously required manual multi-terminal startup and manual folder alignment.
+- **Observed:** The key integration point is a shared JSON directory and synchronized runtime arguments.
+- **Changed:** Launcher now validates config, prepares a fresh live JSON folder, starts `OpenPoseDemo.exe --write_json <dir>`, then runs `python -m src.inference.live_openpose_debug` against that same directory.
+- **Takeaway:** A single launcher command removes most setup friction and lowers operator error during iterative live tests.
+
+### Step 3: shutdown reliability + operator defaults
+- **Attempted:** Added clean-stop behavior and practical defaults for live-debug iteration.
+- **Why:** Without coordinated shutdown, OpenPose can be left running in the background after classifier exit.
+- **Observed:** Keeping classifier in the primary PowerShell session makes Ctrl+C behavior predictable for users.
+- **Changed:** Script traps exit via `try/finally`, terminates the spawned OpenPose process, and prints JSON/log/summary output locations. Defaults include `single_person`, `print-every-n=10`, and quiet warmup enabled (toggle via `-NoQuietWarmup`).
+- **Takeaway:** Session lifecycle is now easier to control, making repeated debug passes and upcoming two-player live test passes much smoother.
+
+### Step 4: user-facing documentation update
+- **Attempted:** Added a README quick-start section for one-command live testing.
+- **Why:** The launcher is only useful if setup steps are explicit and copy-paste friendly.
+- **Observed:** The minimal setup is a one-time local config copy/edit plus one launcher command from repo root.
+- **Changed:** README now documents the exact config file to edit and the launcher command shape.
+- **Takeaway:** Onboarding to live OpenPose + classifier testing is now short, repeatable, and report-ready.

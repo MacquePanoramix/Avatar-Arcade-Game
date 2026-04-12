@@ -80,6 +80,30 @@ Copy `.env.example` to `.env` if you want local environment customization.
 
 ---
 
+
+## One-command live test (Windows, OpenPose + debug classifier)
+
+This repo does **not** ship OpenPose binaries. For live testing, point the launcher at your local OpenPose install once, then run one command from repo root.
+
+1. Copy the local config template and edit it:
+   ```powershell
+   Copy-Item .\configs\local_paths.example.yaml .\configs\local_paths.yaml
+   ```
+   Update at least `openpose_demo_exe` in `configs/local_paths.yaml` (and optionally `openpose_models_dir`).
+
+2. Run the launcher:
+   ```powershell
+   .\tools\live\start_live_debug.ps1 -TrackingMode single_person
+   ```
+
+What the launcher does:
+- starts external `OpenPoseDemo.exe` and keeps the normal OpenPose camera/skeleton window visible
+- writes JSON into a fresh repo folder (`data/raw/live_buffer/openpose_session/live_test` by default)
+- clears old JSON by default (use `-KeepJson` to keep prior files)
+- starts `python -m src.inference.live_openpose_debug` on the same JSON folder
+- forwards useful flags: `-TrackingMode`, `-PrintEveryN`, `-NoQuietWarmup`
+- stops OpenPose automatically when you stop the classifier (Ctrl+C)
+
 ## Development Roadmap (Scaffold-First)
 
 1. Finalize data schema for skeleton sequence format.
