@@ -107,6 +107,34 @@ What the launcher does:
 - optional automatic cleanup is opt-in only via `-KillOpenPoseOnExit`
 - supports safer startup timing via `-OpenPoseStartupTimeoutSec 60` (default) or `-OpenPoseStartupTimeoutSec 0` to wait indefinitely
 
+## Manual live/replay debug with intended label + confidence summary
+
+When launcher automation is unreliable, use the manual 2-step debug flow:
+
+1. Record OpenPose JSON frames into a folder (live run or replay export).
+2. Run the debug classifier with an intended gesture tag for that run:
+   ```bash
+   python -m src.inference.live_openpose_debug \
+     --json-dir data/raw/live_buffer/openpose_session/live_test \
+     --model-path models/checkpoints/best_mlp.keras \
+     --intended-label defense_fire
+   ```
+   - `--intended-label` is optional.
+   - If provided, the value is written to every row in the output CSV log as `intended_label`.
+3. Summarize confidence behavior from the generated CSV:
+   ```bash
+   python -m src.analysis.analyze_live_debug_confidence \
+     --csv logs/inference/live_debug_YYYYMMDD_HHMMSS.csv
+   ```
+   Optional thresholds:
+   ```bash
+   python -m src.analysis.analyze_live_debug_confidence \
+     --csv logs/inference/live_debug_YYYYMMDD_HHMMSS.csv \
+     --thresholds 0.50 0.70 0.80 0.90
+   ```
+
+The analysis writes `<csv_stem>_confidence_summary.json` next to the CSV and prints a concise threshold/confusion-oriented summary in the terminal.
+
 ## Development Roadmap (Scaffold-First)
 
 1. Finalize data schema for skeleton sequence format.
