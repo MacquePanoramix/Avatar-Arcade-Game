@@ -12,7 +12,7 @@ import argparse
 import csv
 import json
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,17 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Optional exit after N consecutive polls with no new frames (0 = never exit).",
     )
+    parser.add_argument(
+        "--print-every-n",
+        type=int,
+        default=1,
+        help="Print one status block every N processed frames (default: 1).",
+    )
+    parser.add_argument(
+        "--quiet-warmup",
+        action="store_true",
+        help="Reduce warmup console output; still logs warmup frames to CSV.",
+    )
     return parser.parse_args()
 
 
@@ -99,16 +110,16 @@ def default_log_path() -> Path:
     return logs_root / f"live_debug_{timestamp}.csv"
 
 
-def probability_bars(probs: np.ndarray, id_to_label: dict[int, str], width: int = 18, top_k: int = 3) -> str:
+def summary_path_from_csv(csv_path: Path) -> Path:
+    return csv_path.with_name(f"{csv_path.stem}_summary.json")
+
+
+def compact_top3(probs: np.ndarray, id_to_label: dict[int, str], top_k: int = 3) -> str:
     top_idx = np.argsort(probs)[-top_k:][::-1]
-    lines: list[str] = []
-    for rank, class_idx in enumerate(top_idx, start=1):
-        p = float(probs[class_idx])
-        bar_len = int(round(p * width))
-        bar = "#" * bar_len + "-" * (width - bar_len)
-        label = id_to_label.get(int(class_idx), f"class_{int(class_idx)}")
-        lines.append(f"{rank}. {label:<15} [{bar}] {p:.3f}")
-    return "\n".join(lines)
+    return " | ".join(
+        f"{id_to_label.get(int(class_idx), f'class_{int(class_idx)}')}={float(probs[class_idx]):.3f}"
+        for class_idx in top_idx
+    )
 
 
 def main() -> None:
@@ -135,6 +146,8 @@ def main() -> None:
     rolling: deque[np.ndarray] = deque(maxlen=SEQUENCE_LENGTH)
     ema_probs: np.ndarray | None = None
     seen_files: set[str] = set()
+    print_every_n = max(1, int(args.print_every_n))
+    summary_path = summary_path_from_csv(log_csv_path)
 
     log_csv_path.parent.mkdir(parents=True, exist_ok=True)
     csv_file = log_csv_path.open("w", encoding="utf-8", newline="")
@@ -152,6 +165,7 @@ def main() -> None:
             "top2_prob",
             "top3_label",
             "top3_prob",
+            "had_joint_repair",
             "repaired_frame",
             "used_prev_frame_copy",
             "suspicious_jump",
@@ -166,7 +180,21 @@ def main() -> None:
     print(f"Model: {model_path}")
     print(f"Label map: {label_map_path}")
     print(f"CSV log: {log_csv_path}")
+    print(f"Summary: {summary_path}")
     print("Press Ctrl+C to stop.\n")
+
+    total_frames = 0
+    warmup_frames = 0
+    inference_frames = 0
+    joint_repair_frames = 0
+    prev_copy_frames = 0
+    suspicious_frames = 0
+    missing_joint_sum = 0
+    min_missing_joints: int | None = None
+    max_missing_joints = 0
+    raw_class_counts: Counter[str] = Counter()
+    smoothed_class_counts: Counter[str] = Counter()
+    raw_smoothed_disagreements: Counter[str] = Counter()
 
     idle_polls = 0
     try:
@@ -193,15 +221,38 @@ def main() -> None:
                     # OpenPose may still be writing this file; skip safely.
                     continue
 
+                total_frames += 1
+                missing_joints = int(frame_result.missing_joint_count)
+                missing_joint_sum += missing_joints
+                min_missing_joints = (
+                    missing_joints
+                    if min_missing_joints is None
+                    else min(min_missing_joints, missing_joints)
+                )
+                max_missing_joints = max(max_missing_joints, missing_joints)
+                if frame_result.had_joint_repair:
+                    joint_repair_frames += 1
+                if frame_result.used_prev_frame_copy:
+                    prev_copy_frames += 1
+                if frame_result.suspicious_jump:
+                    suspicious_frames += 1
+
                 rolling.append(frame_result.features_30)
                 fill = len(rolling)
 
                 if fill < SEQUENCE_LENGTH:
-                    print(
-                        f"buffer {fill}/{SEQUENCE_LENGTH} | warming up | "
-                        f"repair={frame_result.was_repaired_frame} "
-                        f"suspicious={frame_result.suspicious_jump}"
+                    warmup_frames += 1
+                    should_print_warmup = (
+                        not args.quiet_warmup
+                        and (warmup_frames % print_every_n == 0 or fill == SEQUENCE_LENGTH - 1)
                     )
+                    if should_print_warmup:
+                        print(
+                            f"[warmup {fill:>2}/{SEQUENCE_LENGTH}] frame={frame_path.name} "
+                            f"| miss={missing_joints:>2} joint_fix={'Y' if frame_result.had_joint_repair else 'N'} "
+                            f"prev_copy={'Y' if frame_result.used_prev_frame_copy else 'N'} "
+                            f"susp={'Y' if frame_result.suspicious_jump else 'N'}"
+                        )
                     writer.writerow(
                         {
                             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -215,10 +266,11 @@ def main() -> None:
                             "top2_prob": "",
                             "top3_label": "",
                             "top3_prob": "",
+                            "had_joint_repair": int(frame_result.had_joint_repair),
                             "repaired_frame": int(frame_result.was_repaired_frame),
                             "used_prev_frame_copy": int(frame_result.used_prev_frame_copy),
                             "suspicious_jump": int(frame_result.suspicious_jump),
-                            "missing_joint_count": frame_result.missing_joint_count,
+                            "missing_joint_count": missing_joints,
                             "intended_label": "",
                         }
                     )
@@ -243,21 +295,25 @@ def main() -> None:
                 smoothed_idx = int(np.argmax(ema_probs))
                 raw_label = id_to_label.get(raw_idx, f"class_{raw_idx}")
                 smoothed_label = id_to_label.get(smoothed_idx, f"class_{smoothed_idx}")
+                inference_frames += 1
+                raw_class_counts[raw_label] += 1
+                smoothed_class_counts[smoothed_label] += 1
+                if raw_label != smoothed_label:
+                    raw_smoothed_disagreements[f"{raw_label} -> {smoothed_label}"] += 1
 
-                print("-" * 72)
-                print(f"frame: {frame_path.name}")
-                print(f"buffer: {fill}/{SEQUENCE_LENGTH}")
-                print(f"raw:      {raw_label}")
-                print(f"smoothed: {smoothed_label}")
-                print(
-                    "status: "
-                    f"repair={frame_result.was_repaired_frame} "
-                    f"prev_copy={frame_result.used_prev_frame_copy} "
-                    f"suspicious_jump={frame_result.suspicious_jump} "
-                    f"missing_joints={frame_result.missing_joint_count}"
-                )
-                print("top-3 raw probabilities:")
-                print(probability_bars(raw_probs, id_to_label=id_to_label, top_k=3))
+                if inference_frames % print_every_n == 0:
+                    severity = "!!" if frame_result.used_prev_frame_copy or frame_result.suspicious_jump else "--"
+                    print(
+                        f"{severity} frame={frame_path.name} | raw={raw_label} | smooth={smoothed_label} "
+                        f"| top3: {compact_top3(raw_probs, id_to_label=id_to_label, top_k=3)}"
+                    )
+                    print(
+                        "   status: "
+                        f"joints_missing={missing_joints} "
+                        f"joint_repair={'yes' if frame_result.had_joint_repair else 'no'} "
+                        f"prev_copy={'yes' if frame_result.used_prev_frame_copy else 'no'} "
+                        f"suspicious_jump={'yes' if frame_result.suspicious_jump else 'no'}"
+                    )
 
                 top3 = np.argsort(raw_probs)[-3:][::-1]
                 writer.writerow(
@@ -273,10 +329,11 @@ def main() -> None:
                         "top2_prob": float(raw_probs[top3[1]]),
                         "top3_label": id_to_label.get(int(top3[2]), f"class_{int(top3[2])}"),
                         "top3_prob": float(raw_probs[top3[2]]),
+                        "had_joint_repair": int(frame_result.had_joint_repair),
                         "repaired_frame": int(frame_result.was_repaired_frame),
                         "used_prev_frame_copy": int(frame_result.used_prev_frame_copy),
                         "suspicious_jump": int(frame_result.suspicious_jump),
-                        "missing_joint_count": frame_result.missing_joint_count,
+                        "missing_joint_count": missing_joints,
                         "intended_label": "",
                     }
                 )
@@ -285,7 +342,47 @@ def main() -> None:
         print("\nStopped by user.")
     finally:
         csv_file.close()
+        avg_missing_joints = (missing_joint_sum / total_frames) if total_frames > 0 else 0.0
+        summary_payload: dict[str, Any] = {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "total_frames_processed": total_frames,
+            "warmup_frames": warmup_frames,
+            "inference_frames": inference_frames,
+            "frames_with_joint_repair": joint_repair_frames,
+            "frames_with_prev_frame_copy": prev_copy_frames,
+            "frames_flagged_suspicious_jump": suspicious_frames,
+            "missing_joints": {
+                "average": avg_missing_joints,
+                "min": 0 if min_missing_joints is None else min_missing_joints,
+                "max": max_missing_joints,
+            },
+            "raw_prediction_class_counts": dict(raw_class_counts),
+            "smoothed_prediction_class_counts": dict(smoothed_class_counts),
+            "raw_to_smoothed_disagreements_top10": dict(raw_smoothed_disagreements.most_common(10)),
+        }
+        summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
+
+        print("\n=== Run Summary ===")
+        print(f"frames_total={total_frames} warmup={warmup_frames} inference={inference_frames}")
+        print(
+            "repair_stats: "
+            f"joint_repair={joint_repair_frames} "
+            f"prev_copy={prev_copy_frames} "
+            f"suspicious_jump={suspicious_frames}"
+        )
+        print(
+            "missing_joints: "
+            f"avg={avg_missing_joints:.2f} min={summary_payload['missing_joints']['min']} "
+            f"max={summary_payload['missing_joints']['max']}"
+        )
+        if raw_class_counts:
+            print(f"raw_counts: {dict(raw_class_counts)}")
+        if smoothed_class_counts:
+            print(f"smoothed_counts: {dict(smoothed_class_counts)}")
+        if raw_smoothed_disagreements:
+            print(f"raw->smoothed disagreements (top): {dict(raw_smoothed_disagreements.most_common(5))}")
         print(f"Log saved: {log_csv_path}")
+        print(f"Summary saved: {summary_path}")
 
 
 if __name__ == "__main__":
