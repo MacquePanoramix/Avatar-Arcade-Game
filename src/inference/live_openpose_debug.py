@@ -93,6 +93,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Reduce warmup console output; still logs warmup frames to CSV.",
     )
+    parser.add_argument(
+        "--intended-label",
+        type=str,
+        default="",
+        help=(
+            "Optional run-level intended gesture label (for example: attack_earth). "
+            "Written into every CSV row for downstream confidence analysis."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -146,6 +155,12 @@ def main() -> None:
 
     id_to_label = load_label_map(label_map_path)
     num_classes = len(id_to_label)
+    intended_label = str(args.intended_label).strip()
+    known_labels = set(id_to_label.values())
+    if intended_label and intended_label not in known_labels:
+        raise ValueError(
+            f"--intended-label '{intended_label}' is not in label map labels: {sorted(known_labels)}"
+        )
 
     model = keras.models.load_model(model_path)
     preprocessor = RuntimePreprocessor(
@@ -198,6 +213,7 @@ def main() -> None:
     print(f"CSV log: {log_csv_path}")
     print(f"Summary: {summary_path}")
     print(f"Tracking mode: {args.tracking_mode}")
+    print(f"Intended label: {intended_label or '(none)'}")
     print("Press Ctrl+C to stop.\n")
 
     total_frames = 0
@@ -296,7 +312,7 @@ def main() -> None:
                             "selected_left_person_index": frame_result.selected_left_person_index,
                             "selected_right_person_index": frame_result.selected_right_person_index,
                             "tracking_note": frame_result.tracking_note,
-                            "intended_label": "",
+                            "intended_label": intended_label,
                         }
                     )
                     csv_file.flush()
@@ -370,7 +386,7 @@ def main() -> None:
                         "selected_left_person_index": frame_result.selected_left_person_index,
                         "selected_right_person_index": frame_result.selected_right_person_index,
                         "tracking_note": frame_result.tracking_note,
-                        "intended_label": "",
+                        "intended_label": intended_label,
                     }
                 )
                 csv_file.flush()
@@ -382,6 +398,7 @@ def main() -> None:
         summary_payload: dict[str, Any] = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "tracking_mode": args.tracking_mode,
+            "intended_label": intended_label,
             "total_frames_processed": total_frames,
             "warmup_frames": warmup_frames,
             "inference_frames": inference_frames,

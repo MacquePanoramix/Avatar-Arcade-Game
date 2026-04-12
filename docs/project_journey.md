@@ -513,3 +513,35 @@ The launcher was therefore changed to **safe-by-default** behavior:
 Automatic OpenPose termination is now **opt-in only** via an explicit kill flag.
 
 Current takeaway: for live debugging on heterogeneous Windows setups, manual OpenPose shutdown is the safer default; aggressive process-kill cleanup must be explicit and optional.
+
+## Live debug confidence instrumentation: intended labels + threshold analysis
+
+Recent manual live/replay debug runs showed a useful pattern: idle predictions were usually very strong, while elemental boundaries (especially `attack_fire` vs `defense_fire`) still produced ambiguity. That made it hard to decide a safe deployment confidence threshold from eyeballing terminal output alone.
+
+To make threshold design evidence-driven, we added explicit run-level intended-label tagging and a lightweight confidence summary script focused on live debug CSV artifacts.
+
+### What was attempted and why
+
+- Added run-level `--intended-label` support to `src.inference.live_openpose_debug`.
+  - Goal: tag each replay/live-debug run with the gesture we expected, so confidence behavior can be analyzed against intent.
+- Added `src/analysis/analyze_live_debug_confidence.py`.
+  - Goal: compute compact confidence and prediction-distribution summaries that are directly useful for choosing an abstain/confidence threshold rule.
+- Updated README usage docs for the manual two-step workflow.
+  - Goal: keep the process repeatable when launcher automation is not the immediate priority.
+
+### What changed
+
+- Live debug CSV rows now include `intended_label` populated from the CLI value (empty when omitted).
+- Live debug run summary JSON now also records the intended label used for the run.
+- New confidence-analysis command produces:
+  - total frames/inference frames,
+  - raw + smoothed prediction counts,
+  - overall and per-class confidence summaries,
+  - frame counts above threshold buckets,
+  - intended-label match vs non-match confidence stats,
+  - top competing top-1 classes when intended label is provided.
+- Analysis output is saved as `<csv_stem>_confidence_summary.json` for report-ready reuse.
+
+### Current takeaway
+
+We now have practical tooling to evaluate confidence behavior systematically per debug run, which is a concrete step toward a safe abstain/threshold policy for final game integration. The immediate next step is to run repeated intended-label sessions per gesture and compare retained-vs-abstained frame rates under candidate thresholds (for example 0.70, 0.80, 0.90).
