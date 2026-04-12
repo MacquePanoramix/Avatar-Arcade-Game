@@ -187,3 +187,59 @@ This error-analysis phase is intended to answer whether residual errors are most
   - Writes run-local `predictions.csv` (in addition to backward-compatible `*_test_predictions.csv`),
   - includes sample index, true/pred labels, confidence fields, per-class probabilities,
   - joins preprocessing metadata fields (`gesture`, `person`, `session`, `take`, `sample_path`) when available for take-level traceability.
+
+## Analysis pipeline repair: confidence and metadata traceability
+
+The first misclassification-analysis round was directionally useful, but only partially successful.
+It confirmed the dominant confusion pairs (especially `attack_fire` ↔ `defense_fire`, plus `defense_earth` ↔ `idle` overlap), which matched the broader baseline narrative.
+However, the analysis export itself still had critical gaps:
+
+- `confidence_of_predicted_class` appeared but contained missing/NaN values in practice,
+- sample traceability metadata was not consistently carried through to analysis outputs,
+- this prevented reliable person/session/take-level forensic debugging.
+
+Because of that, this repair step focused on two pipeline guarantees:
+
+1. prediction-confidence export must be numerically valid per test row,
+2. metadata alignment must preserve sample-level traceability from processed data into run predictions and analysis tables.
+
+### Why this repair matters scientifically
+
+Without confidence values, we cannot distinguish between:
+
+- confidently wrong predictions (possible class boundary or label-ambiguity issue), and
+- low-confidence borderline misses (possible representation uncertainty).
+
+Without traceability metadata, we cannot test whether mistakes cluster by:
+
+- person,
+- session,
+- take,
+- or a specific original capture path.
+
+That means interventions would be guesswork instead of evidence-driven.
+The repair therefore improves the reliability of targeted debugging while keeping the project conclusion unchanged: **full_mlp remains the practical best baseline**.
+
+### Repair implementation summary
+
+Files changed:
+
+- `src/training/train_lstm.py`
+- `src/analysis/analyze_misclassifications.py`
+- `README.md`
+- `docs/project_journey.md`
+
+New validations/warnings added:
+
+- warnings for prediction/test-size mismatches,
+- duplicate `sample_index` detection,
+- metadata duplicate/drop alignment warnings,
+- explicit confidence NaN/availability checks,
+- explicit summary flags for confidence availability and metadata traceability availability.
+
+Repaired outputs now contain (when available):
+
+- predicted and true-class confidence values,
+- second-best prediction label/confidence,
+- per-sample traceability fields (`gesture`, `person`, `session`, `take`, `original_sample_path`),
+- confidence and traceability availability stats in both `summary.json` and `summary.md`.

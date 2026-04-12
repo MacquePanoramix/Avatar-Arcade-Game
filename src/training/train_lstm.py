@@ -522,9 +522,21 @@ def save_test_reports(
     plt.savefig(reports_dir / f"{filename_prefix}confusion_matrix.png", dpi=150)
     plt.close()
 
+    if y_pred_probs.ndim != 2:
+        raise ValueError(
+            f"Expected y_pred_probs shape (num_samples, num_classes), got {y_pred_probs.shape}"
+        )
+    if y_pred_probs.shape[0] != len(y_test):
+        raise ValueError(
+            "Predicted probability row count does not match y_test length: "
+            f"{y_pred_probs.shape[0]} vs {len(y_test)}"
+        )
+
     class_ids_sorted = sorted(id_to_name.keys())
     predicted_confidence = np.max(y_pred_probs, axis=1)
     true_confidence = y_pred_probs[np.arange(len(y_test)), y_test]
+    top2_class_ids = np.argsort(y_pred_probs, axis=1)[:, -2]
+    top2_confidence = y_pred_probs[np.arange(len(y_test)), top2_class_ids]
 
     predictions_df = pd.DataFrame(
         {
@@ -536,6 +548,10 @@ def save_test_reports(
             "predicted_label_name": [id_to_name.get(int(v), f"class_{int(v)}") for v in y_pred],
             "confidence_of_predicted_class": predicted_confidence,
             "confidence_of_true_class": true_confidence,
+            "top2_predicted_label_name": [
+                id_to_name.get(int(v), f"class_{int(v)}") for v in top2_class_ids
+            ],
+            "top2_predicted_confidence": top2_confidence,
             "is_correct": y_test == y_pred,
         }
     )
@@ -548,11 +564,34 @@ def save_test_reports(
 
     # Add traceability fields from preprocessing metadata (if available).
     if metadata_df is not None and "sample_index" in metadata_df.columns:
-        metadata_fields = ["gesture", "person", "session", "take", "sample_path"]
+        metadata_fields = [
+            "gesture",
+            "person",
+            "session",
+            "take",
+            "sample_path",
+            "original_sample_path",
+        ]
         metadata_subset_cols = [c for c in metadata_fields if c in metadata_df.columns]
         if metadata_subset_cols:
             metadata_subset = metadata_df[["sample_index", *metadata_subset_cols]].copy()
+            duplicate_count = int(metadata_subset["sample_index"].duplicated().sum())
+            if duplicate_count > 0:
+                print(
+                    "Warning: metadata contains duplicate sample_index values; "
+                    "dropping duplicates before prediction join."
+                )
+                metadata_subset = metadata_subset.drop_duplicates(subset=["sample_index"], keep="first")
             predictions_df = predictions_df.merge(metadata_subset, on="sample_index", how="left")
+            if "sample_path" in predictions_df.columns and "original_sample_path" not in predictions_df.columns:
+                predictions_df["original_sample_path"] = predictions_df["sample_path"]
+
+            missing_metadata_rows = int(predictions_df["gesture"].isna().sum()) if "gesture" in predictions_df.columns else 0
+            if missing_metadata_rows > 0:
+                print(
+                    f"Warning: metadata join could not find rows for {missing_metadata_rows} "
+                    "test samples. Check sample_index alignment."
+                )
 
     # Backward-compatible artifact name.
     predictions_df.to_csv(reports_dir / f"{filename_prefix}test_predictions.csv", index=False)
@@ -733,6 +772,15 @@ def main() -> None:
         metadata_df = pd.read_csv(metadata_path).reset_index(drop=True)
         if "sample_index" not in metadata_df.columns:
             metadata_df.insert(0, "sample_index", np.arange(len(metadata_df)))
+        if "sample_path" in metadata_df.columns and "original_sample_path" not in metadata_df.columns:
+            metadata_df["original_sample_path"] = metadata_df["sample_path"]
+        duplicate_metadata_indices = int(metadata_df["sample_index"].duplicated().sum())
+        if duplicate_metadata_indices > 0:
+            print(
+                "\nWarning: metadata.csv has duplicate sample_index values; "
+                "keeping the first row for each sample_index."
+            )
+            metadata_df = metadata_df.drop_duplicates(subset=["sample_index"], keep="first")
         if len(metadata_df) != len(y):
             print(
                 "\nWarning: metadata.csv row count does not match dataset size. "
