@@ -217,12 +217,39 @@ def build_gru_motion_model(
     num_classes: int,
     learning_rate: float,
 ) -> keras.Model:
-    """Build the requested GRU motion-aware architecture (no dropout for first test)."""
+    """Build the requested GRU motion-aware architecture."""
     model = keras.Sequential(
         [
             keras.layers.Input(shape=input_shape),
             keras.layers.GRU(128),
+            keras.layers.Dropout(0.3),
             keras.layers.Dense(64, activation="relu"),
+            keras.layers.Dropout(0.2),
+            keras.layers.Dense(num_classes, activation="softmax"),
+        ]
+    )
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    return model
+
+
+def build_mlp_motion_model(
+    input_dim: int,
+    num_classes: int,
+    learning_rate: float,
+) -> keras.Model:
+    """Build an MLP baseline on flattened motion-aware sequence features."""
+    model = keras.Sequential(
+        [
+            keras.layers.Input(shape=(input_dim,)),
+            keras.layers.Dense(256, activation="relu"),
+            keras.layers.Dropout(0.3),
+            keras.layers.Dense(128, activation="relu"),
+            keras.layers.Dropout(0.3),
             keras.layers.Dense(num_classes, activation="softmax"),
         ]
     )
@@ -369,10 +396,20 @@ def parse_args() -> argparse.Namespace:
         "--model-type",
         type=str,
         default="lstm",
-        choices=["lstm", "mlp", "lstm_motion", "gru_motion"],
+        choices=["lstm", "mlp", "mlp_motion", "lstm_motion", "gru_motion"],
         help=(
             "Model architecture for normal full-dataset training mode. "
-            "Use 'lstm' (default), 'mlp', 'lstm_motion', or 'gru_motion'."
+            "Use 'lstm' (default), 'mlp', 'mlp_motion', 'lstm_motion', or 'gru_motion'."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-monitor",
+        type=str,
+        default="val_loss",
+        choices=["val_loss", "val_accuracy"],
+        help=(
+            "Validation metric monitored by EarlyStopping and ModelCheckpoint. "
+            "Use 'val_accuracy' for motion-sequence reruns when needed."
         ),
     )
     parser.add_argument(
@@ -787,9 +824,10 @@ def main() -> None:
         tiny_metrics = {
             "status": "success",
             "run_name": run_name if run_name else None,
+            "experiment_name": run_name if run_name else None,
             "tiny_overfit": True,
             "tiny_model_type": args.tiny_model_type,
-            "model_type": args.model_type,
+            "model_type": args.tiny_model_type,
             "dataset_shape": list(x.shape),
             "tiny_subset_shape": {"x": list(x_tiny.shape), "y": list(y_tiny.shape)},
             "tiny_subset_distribution": compute_label_distribution(y_tiny, label_map),
@@ -839,6 +877,12 @@ def main() -> None:
             shutil.copy2(src_path, dst_path)
             split_copy_paths[split_name] = str(dst_path)
 
+    checkpoint_monitor = args.checkpoint_monitor
+    monitor_mode = "max" if checkpoint_monitor.endswith("accuracy") else "min"
+    checkpoint_callback: keras.callbacks.ModelCheckpoint | None = None
+    input_representation = "pose_only"
+    model_dataset_shape: list[int] = list(x.shape)
+
     if args.model_type == "lstm":
         epochs = int(get_training_value(config, "epochs", 20))
 
@@ -866,6 +910,7 @@ def main() -> None:
         x_train_model = standardize_sequence_data(x_train, feature_mean, feature_std)
         x_val_model = standardize_sequence_data(x_val, feature_mean, feature_std)
         x_test_model = standardize_sequence_data(x_test, feature_mean, feature_std)
+        model_dataset_shape = [int(x.shape[0]), int(x_train_model.shape[1]), int(x_train_model.shape[2])]
         mean_path, std_path = save_sequence_normalization_stats(reports_dir, feature_mean, feature_std)
 
         model = build_lstm_model(
@@ -877,19 +922,26 @@ def main() -> None:
         )
         checkpoint_path = checkpoints_dir / "best_lstm.keras"
         filename_prefix = ""
+        checkpoint_callback = keras.callbacks.ModelCheckpoint(
+            filepath=str(checkpoint_path),
+            monitor=checkpoint_monitor,
+            mode=monitor_mode,
+            save_best_only=True,
+        )
         callbacks = [
-            keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
+            keras.callbacks.EarlyStopping(
+                monitor=checkpoint_monitor,
+                mode=monitor_mode,
+                patience=10,
+                restore_best_weights=True,
+            ),
             keras.callbacks.ReduceLROnPlateau(
                 monitor="val_loss",
                 factor=0.5,
                 patience=4,
                 min_lr=1e-6,
             ),
-            keras.callbacks.ModelCheckpoint(
-                filepath=str(checkpoint_path),
-                monitor="val_loss",
-                save_best_only=True,
-            ),
+            checkpoint_callback,
         ]
         batch_size = sequence_batch_size
 
@@ -902,6 +954,8 @@ def main() -> None:
         print(f"Sequence batch size: {sequence_batch_size}")
         print(f"Sequence learning rate: {sequence_learning_rate}")
         print(f"Normalization stats saved to: {mean_path} and {std_path}")
+        input_representation = "pose_only"
+        model_dataset_shape = [int(x.shape[0]), int(x_train_model.shape[1]), int(x_train_model.shape[2])]
     elif args.model_type == "mlp":
         epochs = int(get_training_value(config, "epochs", 100))
         # MLP baseline:
@@ -910,6 +964,7 @@ def main() -> None:
         x_train_model = x_train.reshape(x_train.shape[0], -1)
         x_val_model = x_val.reshape(x_val.shape[0], -1)
         x_test_model = x_test.reshape(x_test.shape[0], -1)
+        model_dataset_shape = [int(x.shape[0]), int(x_train_model.shape[1])]
         print(
             f"MLP flattening: each sample {x.shape[1:]} -> "
             f"{x_train_model.shape[1]} features"
@@ -921,19 +976,81 @@ def main() -> None:
         )
         checkpoint_path = checkpoints_dir / "best_mlp.keras"
         filename_prefix = "mlp_"
+        checkpoint_callback = keras.callbacks.ModelCheckpoint(
+            filepath=str(checkpoint_path),
+            monitor=checkpoint_monitor,
+            mode=monitor_mode,
+            save_best_only=True,
+        )
         callbacks = [
-            keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
+            keras.callbacks.EarlyStopping(
+                monitor=checkpoint_monitor,
+                mode=monitor_mode,
+                patience=10,
+                restore_best_weights=True,
+            ),
             keras.callbacks.ReduceLROnPlateau(
                 monitor="val_loss",
                 factor=0.5,
                 patience=4,
                 min_lr=1e-6,
             ),
-            keras.callbacks.ModelCheckpoint(
-                filepath=str(checkpoint_path),
-                monitor="val_loss",
-                save_best_only=True,
+            checkpoint_callback,
+        ]
+    elif args.model_type == "mlp_motion":
+        epochs = int(get_training_value(config, "epochs", 100))
+        x_motion = build_motion_aware_sequences(x)
+        x_train_motion = x_motion[train_idx]
+        x_val_motion = x_motion[val_idx]
+        x_test_motion = x_motion[test_idx]
+
+        feature_mean, feature_std = compute_sequence_normalization_stats(x_train_motion)
+        x_train_motion = standardize_sequence_data(x_train_motion, feature_mean, feature_std)
+        x_val_motion = standardize_sequence_data(x_val_motion, feature_mean, feature_std)
+        x_test_motion = standardize_sequence_data(x_test_motion, feature_mean, feature_std)
+        mean_path, std_path = save_sequence_normalization_stats(reports_dir, feature_mean, feature_std)
+
+        x_train_model = x_train_motion.reshape(x_train_motion.shape[0], -1)
+        x_val_model = x_val_motion.reshape(x_val_motion.shape[0], -1)
+        x_test_model = x_test_motion.reshape(x_test_motion.shape[0], -1)
+        input_representation = "pose_plus_delta"
+        model_dataset_shape = [int(x.shape[0]), int(x_train_model.shape[1])]
+
+        print("\n=== Input Representation ===")
+        print("Representation: position + delta (motion-aware), then flattened for MLP")
+        print(f"Original per-sample shape: {x.shape[1:]}")
+        print(f"Motion-aware per-sample shape: {x_train_motion.shape[1:]}")
+        print(f"Flattened per-sample features: {x_train_model.shape[1]}")
+        print("Standardization applied: yes (train split only)")
+        print(f"Normalization stats saved to: {mean_path} and {std_path}")
+
+        model = build_mlp_motion_model(
+            input_dim=x_train_model.shape[1],
+            num_classes=9,
+            learning_rate=learning_rate,
+        )
+        checkpoint_path = checkpoints_dir / "best_mlp_motion.keras"
+        filename_prefix = "mlp_motion_"
+        checkpoint_callback = keras.callbacks.ModelCheckpoint(
+            filepath=str(checkpoint_path),
+            monitor=checkpoint_monitor,
+            mode=monitor_mode,
+            save_best_only=True,
+        )
+        callbacks = [
+            keras.callbacks.EarlyStopping(
+                monitor=checkpoint_monitor,
+                mode=monitor_mode,
+                patience=10,
+                restore_best_weights=True,
             ),
+            keras.callbacks.ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=0.5,
+                patience=4,
+                min_lr=1e-6,
+            ),
+            checkpoint_callback,
         ]
     else:
         # Motion-aware sequence baseline (LSTM or GRU):
@@ -975,6 +1092,8 @@ def main() -> None:
         print(f"Sequence batch size: {sequence_batch_size}")
         print(f"Sequence learning rate: {sequence_learning_rate}")
         print(f"Normalization stats saved to: {mean_path} and {std_path}")
+        input_representation = "pose_plus_delta"
+        model_dataset_shape = [int(x.shape[0]), int(x_train_model.shape[1]), int(x_train_model.shape[2])]
 
         if args.model_type == "lstm_motion":
             model = build_lstm_motion_model(
@@ -996,19 +1115,26 @@ def main() -> None:
         print(f"Model type: {args.model_type}")
         print("Masking used: no (after standardization, zero no longer means missing)")
 
+        checkpoint_callback = keras.callbacks.ModelCheckpoint(
+            filepath=str(checkpoint_path),
+            monitor=checkpoint_monitor,
+            mode=monitor_mode,
+            save_best_only=True,
+        )
         callbacks = [
-            keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
+            keras.callbacks.EarlyStopping(
+                monitor=checkpoint_monitor,
+                mode=monitor_mode,
+                patience=10,
+                restore_best_weights=True,
+            ),
             keras.callbacks.ReduceLROnPlateau(
                 monitor="val_loss",
                 factor=0.5,
                 patience=4,
                 min_lr=1e-6,
             ),
-            keras.callbacks.ModelCheckpoint(
-                filepath=str(checkpoint_path),
-                monitor="val_loss",
-                save_best_only=True,
-            ),
+            checkpoint_callback,
         ]
         batch_size = sequence_batch_size
 
@@ -1017,6 +1143,8 @@ def main() -> None:
     print("\n=== Training Configuration ===")
     print(f"Max epochs: {epochs}")
     print(f"Batch size: {batch_size}")
+    print(f"Checkpoint / EarlyStopping monitor: {checkpoint_monitor} (mode={monitor_mode})")
+    print("EarlyStopping restore_best_weights: True")
 
     history = model.fit(
         x_train_model,
@@ -1033,7 +1161,24 @@ def main() -> None:
     val_acc_history = history.history.get("val_accuracy", [])
     best_val_loss_epoch = int(np.argmin(val_loss_history) + 1) if val_loss_history else None
     best_val_acc_epoch = int(np.argmax(val_acc_history) + 1) if val_acc_history else None
+    monitor_history = history.history.get(checkpoint_monitor, [])
+    if monitor_history:
+        best_monitor_epoch = (
+            int(np.argmax(monitor_history) + 1)
+            if monitor_mode == "max"
+            else int(np.argmin(monitor_history) + 1)
+        )
+    else:
+        best_monitor_epoch = None
 
+    restored_from_checkpoint = False
+    restored_checkpoint_source = "early_stopping_in_memory_best_weights"
+    if checkpoint_path.exists():
+        model = keras.models.load_model(checkpoint_path)
+        restored_from_checkpoint = True
+        restored_checkpoint_source = str(checkpoint_path)
+
+    train_loss, train_acc = model.evaluate(x_train_model, y_train, verbose=0)
     val_loss, val_acc = model.evaluate(x_val_model, y_val, verbose=0)
     test_loss, test_acc = model.evaluate(x_test_model, y_test, verbose=0)
 
@@ -1059,6 +1204,9 @@ def main() -> None:
         print(f"Best val_loss epoch: {best_val_loss_epoch}")
     if best_val_acc_epoch is not None:
         print(f"Best val_accuracy epoch: {best_val_acc_epoch}")
+    if best_monitor_epoch is not None:
+        print(f"Best {checkpoint_monitor} epoch: {best_monitor_epoch}")
+    print(f"Final restored checkpoint source: {restored_checkpoint_source}")
 
     print("\n=== Saved Outputs ===")
     print(f"- Best checkpoint: {checkpoint_path}")
@@ -1075,9 +1223,11 @@ def main() -> None:
     metrics_payload = {
         "status": "success",
         "run_name": run_name if run_name else None,
+        "experiment_name": run_name if run_name else None,
         "tiny_overfit": False,
         "model_type": args.model_type,
-        "dataset_shape": list(x.shape),
+        "input_representation": input_representation,
+        "dataset_shape": model_dataset_shape,
         "split_sizes": {
             "train": int(len(train_idx)),
             "val": int(len(val_idx)),
@@ -1088,12 +1238,20 @@ def main() -> None:
             "val": compute_label_distribution(y_val, label_map),
             "test": compute_label_distribution(y_test, label_map),
         },
+        "checkpoint_monitor": checkpoint_monitor,
+        "checkpoint_monitor_mode": monitor_mode,
+        "early_stopping_restore_best_weights": True,
+        "best_epoch_by_monitor": best_monitor_epoch,
+        "best_epoch_by_val_loss": best_val_loss_epoch,
+        "best_epoch_by_val_accuracy": best_val_acc_epoch,
+        "restored_from_checkpoint_file": restored_from_checkpoint,
+        "restored_checkpoint_source": restored_checkpoint_source,
         "epochs_requested": int(epochs),
         "epochs_run": int(epochs_ran),
-        "final_train_accuracy": float(history.history.get("accuracy", [np.nan])[-1]),
+        "final_train_accuracy": float(train_acc),
         "final_val_accuracy": float(val_acc),
         "final_test_accuracy": float(test_acc),
-        "final_train_loss": float(history.history.get("loss", [np.nan])[-1]),
+        "final_train_loss": float(train_loss),
         "final_val_loss": float(val_loss),
         "final_test_loss": float(test_loss),
         "best_checkpoint_path": str(checkpoint_path),
