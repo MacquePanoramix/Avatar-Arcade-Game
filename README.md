@@ -156,23 +156,23 @@ Per inference frame, the overlay shows:
 - final action (largest field): triggered label or `NO ACTION`
 - raw label
 - smoothed label
-- top-1 label/confidence
-- top-2 label/confidence
-- top1-top2 margin
+- raw top-1/top-2 label/confidence + raw margin (diagnostic)
+- gate top-1/top-2 label/confidence + gate margin (from smoothed probabilities)
 - decision status (`ACCEPT` or `NO_ACTION`)
 - trigger streak / cooldown / trigger-lock release state
 - people detected + selected person index (plus left/right mapping when available)
 - intended label (if set)
 - latest frame filename
 
-Decision logic is confidence-aware and intentionally conservative:
+Decision logic is confidence-aware and intentionally conservative, and now uses the **smoothed (EMA) distribution** as the action gate:
 
-- top-1 label must be **non-idle**
-- top-1 confidence must be at least `--accept-threshold` (default `0.80`)
-- `(top1 - top2)` must be at least `--margin-threshold` (default `0.20`)
+- smoothed top-1 label must be **non-idle**
+- smoothed top-1 confidence must be at least `--accept-threshold` (default `0.80`)
+- `(smoothed_top1 - smoothed_top2)` must be at least `--margin-threshold` (default `0.20`)
 
 If any condition fails, decision is `NO_ACTION`.
 This is by design for debugging/prototype deployment where underreaction is safer than overreaction.
+Raw per-frame probabilities remain fully visible in terminal/HUD/CSV for diagnostics, but they no longer directly drive ACCEPT/TRIGGER gating.
 
 ### Temporal TRIGGER/NO_TRIGGER layer (gameplay-style output)
 
@@ -188,7 +188,7 @@ This is by design for debugging/prototype deployment where underreaction is safe
 Release frame rule (for lock reset):
 - decision becomes `NO_ACTION`, **or**
 - raw/smoothed label is `idle`, **or**
-- top-1 confidence drops below `--accept-threshold`.
+- smoothed gate top-1 confidence drops below `--accept-threshold`.
 
 Interpretation:
 - `ACCEPT` = frame-level confidence gate.

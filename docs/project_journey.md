@@ -779,3 +779,32 @@ This is more consistent and lower-risk than ad hoc manual copying.
 The next dataset-improvement step is controlled idle expansion before rerunning the MLP baseline.
 The objective is specific: reduce false-positive gesture firing during neutral standing and long idle periods in live use.
 This is a data-refinement phase, not a model-architecture replacement phase.
+
+## Live decision-layer refinement: smoothed-probability gating for ACCEPT/TRIGGER
+
+After the controlled idle-data expansion and retesting, live behavior improved meaningfully during long neutral periods.
+Idle stability is now noticeably stronger than earlier rounds, and in mixed-gesture runs the correct gesture class often appears during the intended action window.
+However, we still observed nearby wrong-class spikes around transition frames (entering/exiting gestures), even when the model looked directionally correct during the core gesture itself.
+
+### Conclusion from these tests
+
+This pattern looked less like a core model-capacity failure and more like a live decision-layer reactivity problem.
+In other words, the frame classifier signal was often usable, but event gating was still too sensitive to per-frame volatility around transitions.
+
+### What changed
+
+The live inference decision path in `live_openpose_debug` was updated so that:
+
+- `ACCEPT` / `NO_ACTION` is now computed from the **smoothed probability distribution** (EMA) rather than raw per-frame top-1/top-2.
+- Trigger streak, cooldown, trigger lock, and release logic remain in place, but are now driven by that smoothed decision stream.
+- Raw outputs remain visible in HUD/terminal/CSV for diagnostics, alongside explicit smoothed gate fields.
+
+### Why this matters
+
+Transition noise should now have less power to create false accepts/triggers, because action trust is tied to the temporally filtered belief instead of a single-frame spike.
+This is a more reliable bridge toward Unity integration, where event stability matters more than frame-by-frame volatility.
+
+### Current takeaway
+
+Before changing model architecture again, improving event logic first and retesting live behavior is the right order of operations.
+This keeps iteration focused on the actual bottleneck observed in recent real-time runs.
