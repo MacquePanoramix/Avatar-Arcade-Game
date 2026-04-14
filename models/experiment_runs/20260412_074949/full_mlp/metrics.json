@@ -1,0 +1,71 @@
+{
+  "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\checkpoints\\best_mlp.keras",
+  "classification_report": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\mlp_classification_report.txt",
+  "confusion_matrix_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\mlp_confusion_matrix.csv",
+  "confusion_matrix_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\mlp_confusion_matrix.png",
+  "dataset_shape": [
+    459,
+    90,
+    30
+  ],
+  "epochs_requested": 100,
+  "epochs_run": 86,
+  "final_test_accuracy": 0.9130434989929199,
+  "final_test_loss": 0.18966975808143616,
+  "final_train_accuracy": 1.0,
+  "final_train_loss": 0.02301384136080742,
+  "final_val_accuracy": 0.8840579986572266,
+  "final_val_loss": 0.2918607294559479,
+  "history_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\mlp_training_history.csv",
+  "history_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\mlp_training_history.png",
+  "model_type": "mlp",
+  "predictions_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\mlp_test_predictions.csv",
+  "run_name": "full_mlp",
+  "split_copy_paths": {
+    "test": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\splits\\test_indices.npy",
+    "train": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\splits\\train_indices.npy",
+    "val": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_mlp\\splits\\val_indices.npy"
+  },
+  "split_label_distribution": {
+    "test": {
+      "attack_air": 7,
+      "attack_earth": 8,
+      "attack_fire": 8,
+      "attack_water": 8,
+      "defense_air": 7,
+      "defense_earth": 8,
+      "defense_fire": 8,
+      "defense_water": 8,
+      "idle": 7
+    },
+    "train": {
+      "attack_air": 36,
+      "attack_earth": 35,
+      "attack_fire": 36,
+      "attack_water": 35,
+      "defense_air": 36,
+      "defense_earth": 36,
+      "defense_fire": 35,
+      "defense_water": 36,
+      "idle": 36
+    },
+    "val": {
+      "attack_air": 8,
+      "attack_earth": 8,
+      "attack_fire": 7,
+      "attack_water": 8,
+      "defense_air": 8,
+      "defense_earth": 7,
+      "defense_fire": 8,
+      "defense_water": 7,
+      "idle": 8
+    }
+  },
+  "split_sizes": {
+    "test": 69,
+    "train": 321,
+    "val": 69
+  },
+  "status": "success",
+  "tiny_overfit": false
+}

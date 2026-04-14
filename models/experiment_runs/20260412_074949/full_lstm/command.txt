@@ -1,0 +1,1 @@
+'D:\Programs\Python\Python 3.12\python.exe' -m src.training.train_lstm --run-name full_lstm --run-dir 'models\experiment_runs\20260412_074949\full_lstm' --model-type lstm --save-split-copy

@@ -1,0 +1,9 @@
+sample_index,split,true_label_id,true_label_name,predicted_label_id,predicted_label_name,confidence_of_predicted_class,confidence_of_true_class,gesture,person,session,take,sample_path,original_sample_path,is_correct
+11,test,2,attack_fire,3,defense_fire,,,attack_air,luis,s2,take_001,data\raw\openpose_json\attack_air\luis\s2\take_001,data\raw\openpose_json\attack_air\luis\s2\take_001,False
+17,test,0,attack_air,4,attack_water,,,attack_air,luis,s4,take_001,data\raw\openpose_json\attack_air\luis\s4\take_001,data\raw\openpose_json\attack_air\luis\s4\take_001,False
+18,test,2,attack_fire,3,defense_fire,,,attack_air,luis,s5,take_001,data\raw\openpose_json\attack_air\luis\s5\take_001,data\raw\openpose_json\attack_air\luis\s5\take_001,False
+23,test,8,idle,7,defense_earth,,,attack_air,p1,s1,take_001,data\raw\openpose_json\attack_air\p1\s1\take_001,data\raw\openpose_json\attack_air\p1\s1\take_001,False
+32,test,2,attack_fire,3,defense_fire,,,attack_air,rin,s15,take_001,data\raw\openpose_json\attack_air\rin\s15\take_001,data\raw\openpose_json\attack_air\rin\s15\take_001,False
+36,test,3,defense_fire,2,attack_fire,,,attack_air,rin,s19,take_001,data\raw\openpose_json\attack_air\rin\s19\take_001,data\raw\openpose_json\attack_air\rin\s19\take_001,False
+54,test,3,defense_fire,2,attack_fire,,,attack_earth,luis,s12,take_001,data\raw\openpose_json\attack_earth\luis\s12\take_001,data\raw\openpose_json\attack_earth\luis\s12\take_001,False
+57,test,7,defense_earth,8,idle,,,attack_earth,luis,s15,take_001,data\raw\openpose_json\attack_earth\luis\s15\take_001,data\raw\openpose_json\attack_earth\luis\s15\take_001,False

@@ -1,0 +1,6 @@
+true_label,predicted_label,count
+attack_fire,defense_fire,3
+defense_fire,attack_fire,2
+attack_air,attack_water,1
+defense_earth,idle,1
+idle,defense_earth,1

@@ -1,0 +1,76 @@
+{
+  "best_checkpoint_path": "models\\checkpoints\\best_mlp.keras",
+  "best_epoch_by_monitor": 100,
+  "best_epoch_by_val_accuracy": 28,
+  "best_epoch_by_val_loss": 100,
+  "checkpoint_monitor": "val_loss",
+  "checkpoint_monitor_mode": "min",
+  "classification_report": "models\\reports\\mlp_classification_report.txt",
+  "confusion_matrix_csv": "models\\reports\\mlp_confusion_matrix.csv",
+  "confusion_matrix_png": "models\\reports\\mlp_confusion_matrix.png",
+  "dataset_shape": [
+    489,
+    720
+  ],
+  "early_stopping_restore_best_weights": true,
+  "epochs_requested": 100,
+  "epochs_run": 100,
+  "experiment_name": null,
+  "final_test_accuracy": 0.9864864945411682,
+  "final_test_loss": 0.08701638877391815,
+  "final_train_accuracy": 1.0,
+  "final_train_loss": 0.02300741896033287,
+  "final_val_accuracy": 0.9589040875434875,
+  "final_val_loss": 0.15269821882247925,
+  "history_csv": "models\\reports\\mlp_training_history.csv",
+  "history_png": "models\\reports\\mlp_training_history.png",
+  "input_representation": "pose_only",
+  "model_type": "mlp",
+  "predictions_csv": "models\\reports\\mlp_test_predictions.csv",
+  "restored_checkpoint_source": "models\\checkpoints\\best_mlp.keras",
+  "restored_from_checkpoint_file": true,
+  "run_name": null,
+  "split_copy_paths": {},
+  "split_label_distribution": {
+    "test": {
+      "attack_air": 7,
+      "attack_earth": 8,
+      "attack_fire": 8,
+      "attack_water": 8,
+      "defense_air": 7,
+      "defense_earth": 7,
+      "defense_fire": 8,
+      "defense_water": 8,
+      "idle": 13
+    },
+    "train": {
+      "attack_air": 36,
+      "attack_earth": 35,
+      "attack_fire": 36,
+      "attack_water": 36,
+      "defense_air": 36,
+      "defense_earth": 36,
+      "defense_fire": 35,
+      "defense_water": 36,
+      "idle": 56
+    },
+    "val": {
+      "attack_air": 8,
+      "attack_earth": 8,
+      "attack_fire": 7,
+      "attack_water": 7,
+      "defense_air": 8,
+      "defense_earth": 8,
+      "defense_fire": 8,
+      "defense_water": 7,
+      "idle": 12
+    }
+  },
+  "split_sizes": {
+    "test": 74,
+    "train": 342,
+    "val": 73
+  },
+  "status": "success",
+  "tiny_overfit": false
+}

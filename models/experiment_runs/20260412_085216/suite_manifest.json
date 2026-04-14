@@ -1,0 +1,86 @@
+{
+  "created_at_utc": "2026-04-12T08:52:16.153048Z",
+  "experiments": [
+    "full_mlp",
+    "full_mlp_motion",
+    "full_lstm_motion_valacc",
+    "full_gru_motion"
+  ],
+  "force_resplit": true,
+  "results": [
+    {
+      "experiment_name": "full_mlp",
+      "metrics_path": "models\\experiment_runs\\20260412_085216\\full_mlp\\metrics.json",
+      "return_code": 0,
+      "status": "success"
+    },
+    {
+      "experiment_name": "full_mlp_motion",
+      "metrics_path": "models\\experiment_runs\\20260412_085216\\full_mlp_motion\\metrics.json",
+      "return_code": 0,
+      "status": "success"
+    },
+    {
+      "experiment_name": "full_lstm_motion_valacc",
+      "metrics_path": "models\\experiment_runs\\20260412_085216\\full_lstm_motion_valacc\\metrics.json",
+      "return_code": 0,
+      "status": "success"
+    },
+    {
+      "experiment_name": "full_gru_motion",
+      "metrics_path": "models\\experiment_runs\\20260412_085216\\full_gru_motion\\metrics.json",
+      "return_code": 0,
+      "status": "success"
+    }
+  ],
+  "split_info": {
+    "files": {
+      "test": "data\\splits\\test_indices.npy",
+      "train": "data\\splits\\train_indices.npy",
+      "val": "data\\splits\\val_indices.npy"
+    },
+    "label_distribution": {
+      "test": {
+        "attack_air": 7,
+        "attack_earth": 8,
+        "attack_fire": 8,
+        "attack_water": 8,
+        "defense_air": 7,
+        "defense_earth": 8,
+        "defense_fire": 8,
+        "defense_water": 8,
+        "idle": 7
+      },
+      "train": {
+        "attack_air": 36,
+        "attack_earth": 35,
+        "attack_fire": 36,
+        "attack_water": 35,
+        "defense_air": 36,
+        "defense_earth": 36,
+        "defense_fire": 35,
+        "defense_water": 36,
+        "idle": 36
+      },
+      "val": {
+        "attack_air": 8,
+        "attack_earth": 8,
+        "attack_fire": 7,
+        "attack_water": 8,
+        "defense_air": 8,
+        "defense_earth": 7,
+        "defense_fire": 8,
+        "defense_water": 7,
+        "idle": 8
+      }
+    },
+    "mode": "fresh_then_reuse",
+    "sizes": {
+      "test": 69,
+      "train": 321,
+      "val": 69
+    }
+  },
+  "suite": "motion_followup",
+  "suite_root": "models\\experiment_runs\\20260412_085216"
+}

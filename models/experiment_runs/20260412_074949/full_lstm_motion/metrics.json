@@ -1,0 +1,71 @@
+{
+  "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\checkpoints\\best_lstm_motion.keras",
+  "classification_report": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\lstm_motion_classification_report.txt",
+  "confusion_matrix_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\lstm_motion_confusion_matrix.csv",
+  "confusion_matrix_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\lstm_motion_confusion_matrix.png",
+  "dataset_shape": [
+    459,
+    90,
+    30
+  ],
+  "epochs_requested": 100,
+  "epochs_run": 35,
+  "final_test_accuracy": 0.47826087474823,
+  "final_test_loss": 1.340492844581604,
+  "final_train_accuracy": 0.9626168012619019,
+  "final_train_loss": 0.21434153616428375,
+  "final_val_accuracy": 0.6231883764266968,
+  "final_val_loss": 1.182610034942627,
+  "history_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\lstm_motion_training_history.csv",
+  "history_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\lstm_motion_training_history.png",
+  "model_type": "lstm_motion",
+  "predictions_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\lstm_motion_test_predictions.csv",
+  "run_name": "full_lstm_motion",
+  "split_copy_paths": {
+    "test": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\splits\\test_indices.npy",
+    "train": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\splits\\train_indices.npy",
+    "val": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\full_lstm_motion\\splits\\val_indices.npy"
+  },
+  "split_label_distribution": {
+    "test": {
+      "attack_air": 7,
+      "attack_earth": 8,
+      "attack_fire": 8,
+      "attack_water": 8,
+      "defense_air": 7,
+      "defense_earth": 8,
+      "defense_fire": 8,
+      "defense_water": 8,
+      "idle": 7
+    },
+    "train": {
+      "attack_air": 36,
+      "attack_earth": 35,
+      "attack_fire": 36,
+      "attack_water": 35,
+      "defense_air": 36,
+      "defense_earth": 36,
+      "defense_fire": 35,
+      "defense_water": 36,
+      "idle": 36
+    },
+    "val": {
+      "attack_air": 8,
+      "attack_earth": 8,
+      "attack_fire": 7,
+      "attack_water": 8,
+      "defense_air": 8,
+      "defense_earth": 7,
+      "defense_fire": 8,
+      "defense_water": 7,
+      "idle": 8
+    }
+  },
+  "split_sizes": {
+    "test": 69,
+    "train": 321,
+    "val": 69
+  },
+  "status": "success",
+  "tiny_overfit": false
+}

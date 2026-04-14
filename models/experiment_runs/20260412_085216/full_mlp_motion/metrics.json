@@ -1,0 +1,80 @@
+{
+  "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\checkpoints\\best_mlp_motion.keras",
+  "best_epoch_by_monitor": 6,
+  "best_epoch_by_val_accuracy": 13,
+  "best_epoch_by_val_loss": 6,
+  "checkpoint_monitor": "val_loss",
+  "checkpoint_monitor_mode": "min",
+  "classification_report": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_classification_report.txt",
+  "confusion_matrix_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_confusion_matrix.csv",
+  "confusion_matrix_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_confusion_matrix.png",
+  "dataset_shape": [
+    459,
+    5400
+  ],
+  "early_stopping_restore_best_weights": true,
+  "epochs_requested": 100,
+  "epochs_run": 16,
+  "experiment_name": "full_mlp_motion",
+  "final_test_accuracy": 0.8115941882133484,
+  "final_test_loss": 0.4589695930480957,
+  "final_train_accuracy": 0.9844236969947815,
+  "final_train_loss": 0.05301608517765999,
+  "final_val_accuracy": 0.8405796885490417,
+  "final_val_loss": 0.4962833821773529,
+  "history_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_training_history.csv",
+  "history_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_training_history.png",
+  "input_representation": "pose_plus_delta",
+  "model_type": "mlp_motion",
+  "predictions_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_test_predictions.csv",
+  "restored_checkpoint_source": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\checkpoints\\best_mlp_motion.keras",
+  "restored_from_checkpoint_file": true,
+  "run_name": "full_mlp_motion",
+  "split_copy_paths": {
+    "test": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\splits\\test_indices.npy",
+    "train": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\splits\\train_indices.npy",
+    "val": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\splits\\val_indices.npy"
+  },
+  "split_label_distribution": {
+    "test": {
+      "attack_air": 7,
+      "attack_earth": 8,
+      "attack_fire": 8,
+      "attack_water": 8,
+      "defense_air": 7,
+      "defense_earth": 8,
+      "defense_fire": 8,
+      "defense_water": 8,
+      "idle": 7
+    },
+    "train": {
+      "attack_air": 36,
+      "attack_earth": 35,
+      "attack_fire": 36,
+      "attack_water": 35,
+      "defense_air": 36,
+      "defense_earth": 36,
+      "defense_fire": 35,
+      "defense_water": 36,
+      "idle": 36
+    },
+    "val": {
+      "attack_air": 8,
+      "attack_earth": 8,
+      "attack_fire": 7,
+      "attack_water": 8,
+      "defense_air": 8,
+      "defense_earth": 7,
+      "defense_fire": 8,
+      "defense_water": 7,
+      "idle": 8
+    }
+  },
+  "split_sizes": {
+    "test": 69,
+    "train": 321,
+    "val": 69
+  },
+  "status": "success",
+  "tiny_overfit": false
+}

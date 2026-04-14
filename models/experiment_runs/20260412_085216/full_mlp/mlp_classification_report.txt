@@ -1,0 +1,15 @@
+               precision    recall  f1-score   support
+
+   attack_air     1.0000    0.8571    0.9231         7
+  defense_air     1.0000    1.0000    1.0000         7
+  attack_fire     0.7143    0.6250    0.6667         8
+ defense_fire     0.6667    0.7500    0.7059         8
+ attack_water     0.8889    1.0000    0.9412         8
+defense_water     1.0000    1.0000    1.0000         8
+ attack_earth     1.0000    1.0000    1.0000         8
+defense_earth     0.8750    0.8750    0.8750         8
+         idle     0.8571    0.8571    0.8571         7
+
+     accuracy                         0.8841        69
+    macro avg     0.8891    0.8849    0.8854        69
+ weighted avg     0.8864    0.8841    0.8836        69

@@ -1,0 +1,81 @@
+{
+  "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\checkpoints\\best_gru_motion.keras",
+  "best_epoch_by_monitor": 1,
+  "best_epoch_by_val_accuracy": 2,
+  "best_epoch_by_val_loss": 1,
+  "checkpoint_monitor": "val_loss",
+  "checkpoint_monitor_mode": "min",
+  "classification_report": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_classification_report.txt",
+  "confusion_matrix_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_confusion_matrix.csv",
+  "confusion_matrix_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_confusion_matrix.png",
+  "dataset_shape": [
+    459,
+    90,
+    60
+  ],
+  "early_stopping_restore_best_weights": true,
+  "epochs_requested": 100,
+  "epochs_run": 11,
+  "experiment_name": "full_gru_motion",
+  "final_test_accuracy": 0.07246376574039459,
+  "final_test_loss": 2.226607084274292,
+  "final_train_accuracy": 0.15576323866844177,
+  "final_train_loss": 2.166823625564575,
+  "final_val_accuracy": 0.1304347813129425,
+  "final_val_loss": 2.2295162677764893,
+  "history_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_training_history.csv",
+  "history_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_training_history.png",
+  "input_representation": "pose_plus_delta",
+  "model_type": "gru_motion",
+  "predictions_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_test_predictions.csv",
+  "restored_checkpoint_source": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\checkpoints\\best_gru_motion.keras",
+  "restored_from_checkpoint_file": true,
+  "run_name": "full_gru_motion",
+  "split_copy_paths": {
+    "test": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\splits\\test_indices.npy",
+    "train": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\splits\\train_indices.npy",
+    "val": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\splits\\val_indices.npy"
+  },
+  "split_label_distribution": {
+    "test": {
+      "attack_air": 7,
+      "attack_earth": 8,
+      "attack_fire": 8,
+      "attack_water": 8,
+      "defense_air": 7,
+      "defense_earth": 8,
+      "defense_fire": 8,
+      "defense_water": 8,
+      "idle": 7
+    },
+    "train": {
+      "attack_air": 36,
+      "attack_earth": 35,
+      "attack_fire": 36,
+      "attack_water": 35,
+      "defense_air": 36,
+      "defense_earth": 36,
+      "defense_fire": 35,
+      "defense_water": 36,
+      "idle": 36
+    },
+    "val": {
+      "attack_air": 8,
+      "attack_earth": 8,
+      "attack_fire": 7,
+      "attack_water": 8,
+      "defense_air": 8,
+      "defense_earth": 7,
+      "defense_fire": 8,
+      "defense_water": 7,
+      "idle": 8
+    }
+  },
+  "split_sizes": {
+    "test": 69,
+    "train": 321,
+    "val": 69
+  },
+  "status": "success",
+  "tiny_overfit": false
+}

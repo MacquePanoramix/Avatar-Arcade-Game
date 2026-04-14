@@ -1,0 +1,1 @@
+'D:\Programs\Python\Python 3.12\python.exe' -m src.training.train_lstm --run-name full_mlp_motion --run-dir 'models\experiment_runs\20260412_085216\full_mlp_motion' --model-type mlp_motion --save-split-copy

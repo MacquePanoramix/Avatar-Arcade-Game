@@ -1,0 +1,160 @@
+{
+  "run_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp",
+  "analysis_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp\\misclassification_analysis",
+  "total_test_samples": 69,
+  "total_correct": 61,
+  "total_incorrect": 8,
+  "overall_test_accuracy": 0.8840579710144928,
+  "most_common_confusion_pairs": [
+    {
+      "true_label": "attack_fire",
+      "predicted_label": "defense_fire",
+      "count": 3
+    },
+    {
+      "true_label": "defense_fire",
+      "predicted_label": "attack_fire",
+      "count": 2
+    },
+    {
+      "true_label": "attack_air",
+      "predicted_label": "attack_water",
+      "count": 1
+    },
+    {
+      "true_label": "defense_earth",
+      "predicted_label": "idle",
+      "count": 1
+    },
+    {
+      "true_label": "idle",
+      "predicted_label": "defense_earth",
+      "count": 1
+    }
+  ],
+  "per_class_mistake_counts": [
+    {
+      "class_name": "attack_fire",
+      "mistake_count": 3
+    },
+    {
+      "class_name": "defense_fire",
+      "mistake_count": 2
+    },
+    {
+      "class_name": "attack_air",
+      "mistake_count": 1
+    },
+    {
+      "class_name": "defense_earth",
+      "mistake_count": 1
+    },
+    {
+      "class_name": "idle",
+      "mistake_count": 1
+    },
+    {
+      "class_name": "attack_earth",
+      "mistake_count": 0
+    },
+    {
+      "class_name": "attack_water",
+      "mistake_count": 0
+    },
+    {
+      "class_name": "defense_air",
+      "mistake_count": 0
+    },
+    {
+      "class_name": "defense_water",
+      "mistake_count": 0
+    }
+  ],
+  "per_class_precision_recall": {
+    "attack_air": {
+      "precision": 1.0,
+      "recall": 0.8571428571428571,
+      "support": 7.0
+    },
+    "attack_earth": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 8.0
+    },
+    "attack_fire": {
+      "precision": 0.7142857142857143,
+      "recall": 0.625,
+      "support": 8.0
+    },
+    "attack_water": {
+      "precision": 0.8888888888888888,
+      "recall": 1.0,
+      "support": 8.0
+    },
+    "defense_air": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 7.0
+    },
+    "defense_earth": {
+      "precision": 0.875,
+      "recall": 0.875,
+      "support": 8.0
+    },
+    "defense_fire": {
+      "precision": 0.6666666666666666,
+      "recall": 0.75,
+      "support": 8.0
+    },
+    "defense_water": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "support": 8.0
+    },
+    "idle": {
+      "precision": 0.8571428571428571,
+      "recall": 0.8571428571428571,
+      "support": 7.0
+    }
+  },
+  "source_predictions_columns": [
+    "y_true",
+    "y_pred",
+    "true_label",
+    "pred_label",
+    "true_label_id",
+    "predicted_label_id",
+    "true_label_name",
+    "predicted_label_name",
+    "sample_index",
+    "split",
+    "is_correct",
+    "confidence_of_predicted_class",
+    "confidence_of_true_class",
+    "gesture",
+    "person",
+    "session",
+    "take",
+    "sample_path",
+    "original_sample_path"
+  ],
+  "confidence_values_available": false,
+  "metadata_traceability_available": true,
+  "validation": {
+    "duplicate_sample_index_count": 0,
+    "expected_test_size": 69,
+    "actual_prediction_rows": 69,
+    "valid_confidence_of_predicted_class_count": 0,
+    "valid_confidence_of_true_class_count": 0,
+    "nan_confidence_of_predicted_class_count": 69,
+    "nan_confidence_of_true_class_count": 69
+  },
+  "traceability": {
+    "rows_missing_traceability_before_join": 69,
+    "rows_missing_traceability_after_join": 0,
+    "rows_with_person": 69,
+    "rows_with_session": 69,
+    "rows_with_take": 69,
+    "rows_with_original_sample_path": 69
+  }
+}

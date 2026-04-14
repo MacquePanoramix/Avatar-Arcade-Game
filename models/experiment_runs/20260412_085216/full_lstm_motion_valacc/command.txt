@@ -1,0 +1,1 @@
+'D:\Programs\Python\Python 3.12\python.exe' -m src.training.train_lstm --run-name full_lstm_motion_valacc --run-dir 'models\experiment_runs\20260412_085216\full_lstm_motion_valacc' --model-type lstm_motion --checkpoint-monitor val_accuracy --save-split-copy

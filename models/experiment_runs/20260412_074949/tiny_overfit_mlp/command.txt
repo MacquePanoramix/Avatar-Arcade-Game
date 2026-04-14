@@ -1,0 +1,1 @@
+'D:\Programs\Python\Python 3.12\python.exe' -m src.training.train_lstm --run-name tiny_overfit_mlp --run-dir 'models\experiment_runs\20260412_074949\tiny_overfit_mlp' --tiny-overfit --tiny-model-type mlp

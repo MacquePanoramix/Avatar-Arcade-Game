@@ -1,0 +1,39 @@
+{
+  "dataset_shape": [
+    459,
+    90,
+    30
+  ],
+  "epochs_requested": 300,
+  "epochs_run": 300,
+  "final_train_accuracy": 1.0,
+  "final_train_loss": 5.695349318557419e-05,
+  "history_csv": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\tiny_overfit_mlp\\tiny_overfit_mlp_history.csv",
+  "history_png": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\tiny_overfit_mlp\\tiny_overfit_mlp_history.png",
+  "model_type": "lstm",
+  "run_name": "tiny_overfit_mlp",
+  "status": "success",
+  "tiny_model_type": "mlp",
+  "tiny_overfit": true,
+  "tiny_subset_distribution": {
+    "attack_air": 2,
+    "attack_earth": 2,
+    "attack_fire": 2,
+    "attack_water": 2,
+    "defense_air": 2,
+    "defense_earth": 2,
+    "defense_fire": 2,
+    "defense_water": 2,
+    "idle": 2
+  },
+  "tiny_subset_shape": {
+    "x": [
+      18,
+      90,
+      30
+    ],
+    "y": [
+      18
+    ]
+  }
+}

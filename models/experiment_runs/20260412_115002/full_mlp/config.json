@@ -1,0 +1,53 @@
+{
+  "args": {
+    "checkpoint_monitor": "val_loss",
+    "force_resplit": false,
+    "model_type": "mlp",
+    "run_dir": "models/experiment_runs/20260412_115002/full_mlp",
+    "run_name": "full_mlp_repair",
+    "save_split_copy": true,
+    "tiny_model_type": "lstm",
+    "tiny_overfit": false
+  },
+  "argv": [
+    "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\src\\training\\train_lstm.py",
+    "--model-type",
+    "mlp",
+    "--run-name",
+    "full_mlp_repair",
+    "--run-dir",
+    "models/experiment_runs/20260412_115002/full_mlp",
+    "--save-split-copy"
+  ],
+  "checkpoints_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_115002\\full_mlp\\checkpoints",
+  "dataset_shape": [
+    459,
+    90,
+    30
+  ],
+  "label_distribution": {
+    "attack_air": 51,
+    "attack_earth": 51,
+    "attack_fire": 51,
+    "attack_water": 51,
+    "defense_air": 51,
+    "defense_earth": 51,
+    "defense_fire": 51,
+    "defense_water": 51,
+    "idle": 51
+  },
+  "processed_dir": "data\\processed",
+  "random_seed": 42,
+  "reports_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_115002\\full_mlp",
+  "run_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_115002\\full_mlp",
+  "run_name": "full_mlp_repair",
+  "splits_dir": "data\\splits",
+  "training_config": {
+    "batch_size": 32,
+    "epochs": 100,
+    "learning_rate": 0.001,
+    "lstm_units": 64,
+    "random_seed": 42,
+    "validation_split": 0.2
+  }
+}

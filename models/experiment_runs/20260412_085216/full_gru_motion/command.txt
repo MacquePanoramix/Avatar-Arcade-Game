@@ -1,0 +1,1 @@
+'D:\Programs\Python\Python 3.12\python.exe' -m src.training.train_lstm --run-name full_gru_motion --run-dir 'models\experiment_runs\20260412_085216\full_gru_motion' --model-type gru_motion --save-split-copy

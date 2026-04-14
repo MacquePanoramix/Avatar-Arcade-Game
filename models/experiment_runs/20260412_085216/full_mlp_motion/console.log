@@ -1,0 +1,181 @@
+
+=== Dataset Summary ===
+X shape: (459, 90, 30)
+y shape: (459,)
+Number of classes in y: 9
+Class counts:
+  - 0 (attack_air): 51
+  - 1 (defense_air): 51
+  - 2 (attack_fire): 51
+  - 3 (defense_fire): 51
+  - 4 (attack_water): 51
+  - 5 (defense_water): 51
+  - 6 (attack_earth): 51
+  - 7 (defense_earth): 51
+  - 8 (idle): 51
+
+=== Full Dataset Training Mode ===
+Model type used: mlp_motion
+
+Using valid existing split indices
+
+=== Split Sizes ===
+Train: 321
+Validation: 69
+Test: 69
+
+Train split class balance:
+  - 0 (attack_air): 36
+  - 1 (defense_air): 36
+  - 2 (attack_fire): 36
+  - 3 (defense_fire): 35
+  - 4 (attack_water): 35
+  - 5 (defense_water): 36
+  - 6 (attack_earth): 35
+  - 7 (defense_earth): 36
+  - 8 (idle): 36
+
+Validation split class balance:
+  - 0 (attack_air): 8
+  - 1 (defense_air): 8
+  - 2 (attack_fire): 7
+  - 3 (defense_fire): 8
+  - 4 (attack_water): 8
+  - 5 (defense_water): 7
+  - 6 (attack_earth): 8
+  - 7 (defense_earth): 7
+  - 8 (idle): 8
+
+Test split class balance:
+  - 0 (attack_air): 7
+  - 1 (defense_air): 7
+  - 2 (attack_fire): 8
+  - 3 (defense_fire): 8
+  - 4 (attack_water): 8
+  - 5 (defense_water): 8
+  - 6 (attack_earth): 8
+  - 7 (defense_earth): 8
+  - 8 (idle): 7
+
+=== Input Representation ===
+Representation: position + delta (motion-aware), then flattened for MLP
+Original per-sample shape: (90, 30)
+Motion-aware per-sample shape: (90, 60)
+Flattened per-sample features: 5400
+Standardization applied: yes (train split only)
+Normalization stats saved to: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\sequence_feature_mean.npy and D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\sequence_feature_std.npy
+
+=== Model Summary ===
+Model: "sequential"
++--------------------------------------------------------------------------+
+| Layer (type)                    | Output Shape           |       Param # |
+|---------------------------------+------------------------+---------------|
+| dense (Dense)                   | (None, 256)            |     1,382,656 |
+|---------------------------------+------------------------+---------------|
+| dropout (Dropout)               | (None, 256)            |             0 |
+|---------------------------------+------------------------+---------------|
+| dense_1 (Dense)                 | (None, 128)            |        32,896 |
+|---------------------------------+------------------------+---------------|
+| dropout_1 (Dropout)             | (None, 128)            |             0 |
+|---------------------------------+------------------------+---------------|
+| dense_2 (Dense)                 | (None, 9)              |         1,161 |
++--------------------------------------------------------------------------+
+ Total params: 1,416,713 (5.40 MB)
+ Trainable params: 1,416,713 (5.40 MB)
+ Non-trainable params: 0 (0.00 B)
+
+=== Training Configuration ===
+Max epochs: 100
+Batch size: 32
+Checkpoint / EarlyStopping monitor: val_loss (mode=min)
+EarlyStopping restore_best_weights: True
+Epoch 1/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m6s[0m 676ms/step - accuracy: 0.1250 - loss: 3.3864
+[1m11/11[0m [32m====================[0m[37m[0m [1m1s[0m 53ms/step - accuracy: 0.3302 - loss: 2.3110 - val_accuracy: 0.6957 - val_loss: 0.9405 - learning_rate: 0.0010
+Epoch 2/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 48ms/step - accuracy: 0.7812 - loss: 0.9965
+[1m 9/11[0m [32m================[0m[37m====[0m [1m0s[0m 7ms/step - accuracy: 0.7816 - loss: 0.8223 
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 39ms/step - accuracy: 0.7788 - loss: 0.7977 - val_accuracy: 0.6957 - val_loss: 0.8469 - learning_rate: 0.0010
+Epoch 3/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 55ms/step - accuracy: 0.7500 - loss: 0.9322
+[1m 7/11[0m [32m============[0m[37m========[0m [1m0s[0m 9ms/step - accuracy: 0.8318 - loss: 0.6223 
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 38ms/step - accuracy: 0.8442 - loss: 0.6050 - val_accuracy: 0.7391 - val_loss: 0.7630 - learning_rate: 0.0010
+Epoch 4/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 74ms/step - accuracy: 0.9375 - loss: 0.2154
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 33ms/step - accuracy: 0.9003 - loss: 0.4563 - val_accuracy: 0.7826 - val_loss: 0.6790 - learning_rate: 0.0010
+Epoch 5/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 91ms/step - accuracy: 0.9062 - loss: 0.6631
+[1m11/11[0m [32m====================[0m[37m[0m [1m1s[0m 47ms/step - accuracy: 0.9252 - loss: 0.3999 - val_accuracy: 0.7971 - val_loss: 0.5780 - learning_rate: 0.0010
+Epoch 6/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 73ms/step - accuracy: 0.8750 - loss: 0.3423
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 34ms/step - accuracy: 0.9190 - loss: 0.2581 - val_accuracy: 0.8406 - val_loss: 0.4963 - learning_rate: 0.0010
+Epoch 7/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 86ms/step - accuracy: 0.9375 - loss: 0.1444
+[1m10/11[0m [32m==================[0m[37m==[0m [1m0s[0m 6ms/step - accuracy: 0.9384 - loss: 0.2687 
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 12ms/step - accuracy: 0.9346 - loss: 0.3448 - val_accuracy: 0.7536 - val_loss: 0.5516 - learning_rate: 0.0010
+Epoch 8/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 34ms/step - accuracy: 0.9375 - loss: 0.1173
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9595 - loss: 0.1106 - val_accuracy: 0.7826 - val_loss: 0.6337 - learning_rate: 0.0010
+Epoch 9/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 28ms/step - accuracy: 0.8750 - loss: 0.3268
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9439 - loss: 0.2325 - val_accuracy: 0.8116 - val_loss: 0.6221 - learning_rate: 0.0010
+Epoch 10/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 34ms/step - accuracy: 0.9375 - loss: 0.1761
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9688 - loss: 0.1527 - val_accuracy: 0.7971 - val_loss: 0.6659 - learning_rate: 0.0010
+Epoch 11/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 28ms/step - accuracy: 0.8750 - loss: 0.2597
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9626 - loss: 0.2355 - val_accuracy: 0.7971 - val_loss: 0.5932 - learning_rate: 5.0000e-04
+Epoch 12/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 27ms/step - accuracy: 0.9375 - loss: 0.2110
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9782 - loss: 0.1117 - val_accuracy: 0.8116 - val_loss: 0.5989 - learning_rate: 5.0000e-04
+Epoch 13/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 28ms/step - accuracy: 0.9062 - loss: 0.3406
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9720 - loss: 0.1033 - val_accuracy: 0.8696 - val_loss: 0.5790 - learning_rate: 5.0000e-04
+Epoch 14/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 28ms/step - accuracy: 1.0000 - loss: 0.0144
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9938 - loss: 0.0823 - val_accuracy: 0.8116 - val_loss: 0.5764 - learning_rate: 5.0000e-04
+Epoch 15/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 30ms/step - accuracy: 0.9688 - loss: 0.1775
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9720 - loss: 0.0932 - val_accuracy: 0.8551 - val_loss: 0.5427 - learning_rate: 2.5000e-04
+Epoch 16/100
+
+[1m 1/11[0m [32m=[0m[37m===================[0m [1m0s[0m 29ms/step - accuracy: 0.9688 - loss: 0.0350
+[1m11/11[0m [32m====================[0m[37m[0m [1m0s[0m 10ms/step - accuracy: 0.9813 - loss: 0.0795 - val_accuracy: 0.8551 - val_loss: 0.5197 - learning_rate: 2.5000e-04
+
+=== Final Metrics ===
+Validation accuracy: 0.8406 (loss: 0.4963)
+Test accuracy: 0.8116 (loss: 0.4590)
+
+=== Training Run Summary ===
+Epochs actually run: 16/100
+EarlyStopping triggered: yes
+Best val_loss epoch: 6
+Best val_accuracy epoch: 13
+Best val_loss epoch: 6
+Final restored checkpoint source: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\checkpoints\best_mlp_motion.keras
+
+=== Saved Outputs ===
+- Best checkpoint: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\checkpoints\best_mlp_motion.keras
+- Training history CSV: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\mlp_motion_training_history.csv
+- Training history plot: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\mlp_motion_training_history.png
+- Classification report: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\mlp_motion_classification_report.txt
+- Confusion matrix CSV: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\mlp_motion_confusion_matrix.csv
+- Confusion matrix PNG: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\mlp_motion_confusion_matrix.png
+- Test predictions CSV: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\mlp_motion_test_predictions.csv
+- Split indices: data\splits\train_indices.npy, data\splits\val_indices.npy, data\splits\test_indices.npy
+- Split copy dir: D:\Documentos\Python Projects\Avatar-Arcade-Game\models\experiment_runs\20260412_085216\full_mlp_motion\splits

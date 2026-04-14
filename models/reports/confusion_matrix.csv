@@ -1,0 +1,10 @@
+,attack_air,defense_air,attack_fire,defense_fire,attack_water,defense_water,attack_earth,defense_earth,idle
+attack_air,0,0,0,0,0,0,0,0,2
+defense_air,0,0,0,0,0,0,0,0,2
+attack_fire,0,0,0,0,0,0,0,0,3
+defense_fire,0,0,0,0,0,0,0,0,2
+attack_water,0,0,0,0,0,0,0,0,3
+defense_water,0,0,0,0,0,0,0,0,2
+attack_earth,0,0,0,0,0,0,0,0,2
+defense_earth,0,0,0,0,0,0,0,0,2
+idle,0,1,0,0,0,0,0,0,2

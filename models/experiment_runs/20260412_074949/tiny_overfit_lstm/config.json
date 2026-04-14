@@ -1,0 +1,52 @@
+{
+  "args": {
+    "force_resplit": false,
+    "model_type": "lstm",
+    "run_dir": "models\\experiment_runs\\20260412_074949\\tiny_overfit_lstm",
+    "run_name": "tiny_overfit_lstm",
+    "save_split_copy": false,
+    "tiny_model_type": "lstm",
+    "tiny_overfit": true
+  },
+  "argv": [
+    "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\src\\training\\train_lstm.py",
+    "--run-name",
+    "tiny_overfit_lstm",
+    "--run-dir",
+    "models\\experiment_runs\\20260412_074949\\tiny_overfit_lstm",
+    "--tiny-overfit",
+    "--tiny-model-type",
+    "lstm"
+  ],
+  "checkpoints_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\tiny_overfit_lstm\\checkpoints",
+  "dataset_shape": [
+    459,
+    90,
+    30
+  ],
+  "label_distribution": {
+    "attack_air": 51,
+    "attack_earth": 51,
+    "attack_fire": 51,
+    "attack_water": 51,
+    "defense_air": 51,
+    "defense_earth": 51,
+    "defense_fire": 51,
+    "defense_water": 51,
+    "idle": 51
+  },
+  "processed_dir": "data\\processed",
+  "random_seed": 42,
+  "reports_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\tiny_overfit_lstm",
+  "run_dir": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_074949\\tiny_overfit_lstm",
+  "run_name": "tiny_overfit_lstm",
+  "splits_dir": "data\\splits",
+  "training_config": {
+    "batch_size": 32,
+    "epochs": 100,
+    "learning_rate": 0.001,
+    "lstm_units": 64,
+    "random_seed": 42,
+    "validation_split": 0.2
+  }
+}

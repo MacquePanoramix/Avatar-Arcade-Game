@@ -1,0 +1,132 @@
+[
+  {
+    "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp\\checkpoints\\best_mlp.keras",
+    "best_epoch_by_monitor": 56,
+    "checkpoint_monitor": "val_loss",
+    "confusion_matrix_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp\\mlp_confusion_matrix.png",
+    "dataset_shape": [
+      459,
+      2700
+    ],
+    "epochs_requested": 100,
+    "epochs_run": 66,
+    "experiment_name": "full_mlp",
+    "final_test_accuracy": 0.8840579986572266,
+    "final_test_loss": 0.19952544569969177,
+    "final_train_accuracy": 1.0,
+    "final_train_loss": 0.0368366539478302,
+    "final_val_accuracy": 0.9130434989929199,
+    "final_val_loss": 0.27421921491622925,
+    "history_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp\\mlp_training_history.csv",
+    "input_representation": "pose_only",
+    "metrics_path": "models\\experiment_runs\\20260412_085216\\full_mlp\\metrics.json",
+    "model_type": "mlp",
+    "notes": "Strong baseline performance",
+    "return_code": 0,
+    "split_sizes": {
+      "test": 69,
+      "train": 321,
+      "val": 69
+    },
+    "status": "success",
+    "tiny_overfit": false
+  },
+  {
+    "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\checkpoints\\best_mlp_motion.keras",
+    "best_epoch_by_monitor": 6,
+    "checkpoint_monitor": "val_loss",
+    "confusion_matrix_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_confusion_matrix.png",
+    "dataset_shape": [
+      459,
+      5400
+    ],
+    "epochs_requested": 100,
+    "epochs_run": 16,
+    "experiment_name": "full_mlp_motion",
+    "final_test_accuracy": 0.8115941882133484,
+    "final_test_loss": 0.4589695930480957,
+    "final_train_accuracy": 0.9844236969947815,
+    "final_train_loss": 0.05301608517765999,
+    "final_val_accuracy": 0.8405796885490417,
+    "final_val_loss": 0.4962833821773529,
+    "history_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_mlp_motion\\mlp_motion_training_history.csv",
+    "input_representation": "pose_plus_delta",
+    "metrics_path": "models\\experiment_runs\\20260412_085216\\full_mlp_motion\\metrics.json",
+    "model_type": "mlp_motion",
+    "notes": "Run completed",
+    "return_code": 0,
+    "split_sizes": {
+      "test": 69,
+      "train": 321,
+      "val": 69
+    },
+    "status": "success",
+    "tiny_overfit": false
+  },
+  {
+    "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_lstm_motion_valacc\\checkpoints\\best_lstm_motion.keras",
+    "best_epoch_by_monitor": 29,
+    "checkpoint_monitor": "val_accuracy",
+    "confusion_matrix_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_lstm_motion_valacc\\lstm_motion_confusion_matrix.png",
+    "dataset_shape": [
+      459,
+      90,
+      60
+    ],
+    "epochs_requested": 100,
+    "epochs_run": 39,
+    "experiment_name": "full_lstm_motion_valacc",
+    "final_test_accuracy": 0.5362318754196167,
+    "final_test_loss": 1.5033005475997925,
+    "final_train_accuracy": 0.9314641952514648,
+    "final_train_loss": 0.3769465684890747,
+    "final_val_accuracy": 0.5362318754196167,
+    "final_val_loss": 1.8667175769805908,
+    "history_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_lstm_motion_valacc\\lstm_motion_training_history.csv",
+    "input_representation": "pose_plus_delta",
+    "metrics_path": "models\\experiment_runs\\20260412_085216\\full_lstm_motion_valacc\\metrics.json",
+    "model_type": "lstm_motion",
+    "notes": "Run completed",
+    "return_code": 0,
+    "split_sizes": {
+      "test": 69,
+      "train": 321,
+      "val": 69
+    },
+    "status": "success",
+    "tiny_overfit": false
+  },
+  {
+    "best_checkpoint_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\checkpoints\\best_gru_motion.keras",
+    "best_epoch_by_monitor": 1,
+    "checkpoint_monitor": "val_loss",
+    "confusion_matrix_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_confusion_matrix.png",
+    "dataset_shape": [
+      459,
+      90,
+      60
+    ],
+    "epochs_requested": 100,
+    "epochs_run": 11,
+    "experiment_name": "full_gru_motion",
+    "final_test_accuracy": 0.07246376574039459,
+    "final_test_loss": 2.226607084274292,
+    "final_train_accuracy": 0.15576323866844177,
+    "final_train_loss": 2.166823625564575,
+    "final_val_accuracy": 0.1304347813129425,
+    "final_val_loss": 2.2295162677764893,
+    "history_path": "D:\\Documentos\\Python Projects\\Avatar-Arcade-Game\\models\\experiment_runs\\20260412_085216\\full_gru_motion\\gru_motion_training_history.csv",
+    "input_representation": "pose_plus_delta",
+    "metrics_path": "models\\experiment_runs\\20260412_085216\\full_gru_motion\\metrics.json",
+    "model_type": "gru_motion",
+    "notes": "Near chance-level test accuracy",
+    "return_code": 0,
+    "split_sizes": {
+      "test": 69,
+      "train": 321,
+      "val": 69
+    },
+    "status": "success",
+    "tiny_overfit": false
+  }
+]
