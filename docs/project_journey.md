@@ -577,3 +577,30 @@ That introduced stale JSON contamination across runs.
 
 The reliable live debugging path remains manual, but each recording must use a new session folder.
 Fresh per-run directories eliminate stale-file carryover and make replay/confidence interpretation trustworthy again.
+
+## Live debug overlay stage: confidence-aware accept/abstain prototype
+
+What was attempted and why:
+
+- Moved the existing working live replay pipeline (`python -m src.inference.live_openpose_debug --json-dir ...`) into a true real-time debug stage by adding a lightweight on-screen terminal HUD and a confidence-aware decision layer.
+- This was done because recent clean live tests (especially `defense_earth`) showed the pose-only MLP is strong enough to justify real-time trust diagnostics, while still needing conservative action gating for noisy boundaries (for example within fire-family classes).
+
+What was observed beforehand:
+
+- `idle` was already generally strong.
+- `defense_earth` was notably strong/stable.
+- `attack_earth` was detectable but less clean.
+- `defense_fire` could be strong, but class-boundary ambiguity still appears in fire-family transitions.
+
+What changed in this step:
+
+- Added live overlay output fields for: raw label, smoothed label, top-1/top-2 confidence, margin, and decision state.
+- Added configurable decision thresholds (`--accept-threshold`, `--margin-threshold`) and explicit `ACCEPT` vs `NO_ACTION` logic.
+- Enforced non-idle-only acceptance: `idle` remains visible as prediction but does not produce action acceptance.
+- Extended CSV logging with decision fields (`decision_label`, `decision_status`, `top1_margin`, threshold columns) while keeping prior log usefulness.
+- Added launcher passthrough for threshold/overlay flags and README usage guidance for the new debug stage.
+
+Current takeaway:
+
+- This stage gives a deployment-prototype answer to the three critical live questions: what the model thinks now, how sure it is, and whether we trust it enough to act.
+- The conservative accept/abstain policy is intentional because overreaction is more dangerous than underreaction in this game, and game-level cooldown/behavior logic can remain a later integration layer.
