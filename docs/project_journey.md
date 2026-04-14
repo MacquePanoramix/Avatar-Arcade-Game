@@ -926,3 +926,36 @@ That improves the defensibility of future dataset refinement decisions based on 
 ### Current takeaway
 
 Before integrating active-range labels into preprocessing, first ensure the review process is genuinely usable for humans and robust to JSON-only takes.
+
+## Active-range-aware temporal resampling rollout (short fixed-length train/live representation)
+
+### What we observed
+
+Even after preprocessing-path unification improved live behavior, runtime prediction still felt delayed and often contaminated by idle filler around the actual movement.
+The 90-frame input contract was still mixing too much irrelevant context relative to real gesture duration.
+
+We also observed an FPS mismatch pattern: live often behaves closer to ~10–11 fps, while many captured/training takes are closer to ~15 fps.
+That means equal frame counts do not imply equal time scale across train vs live.
+
+### Conclusion
+
+Keeping fixed-length model input is still fine, but the fixed-length sequence should be rebuilt around gesture activity and a shared temporal pace.
+In other words, we should not blindly feed the first full 90-frame take window when only a smaller active span carries the gesture signal.
+
+### What changed
+
+- Training preprocessing now reads active-range labels (`active_start_frame`, `active_end_frame`) from the central manifest and uses them to crop non-idle takes with context.
+- Cropped causal sequences are temporally resampled into a shorter fixed representation.
+- Idle takes are handled separately with deterministic shorter fixed resampling (no active-range dependency).
+- Live inference now builds model input from a rolling recent causal window and applies the same temporal resampling policy to the same fixed target length.
+
+### Why it matters
+
+- Less idle filler per sample.
+- Better emphasis on the actual gesture-active segment.
+- More comparable train/live time scale despite FPS differences.
+- Lower effective live delay before model input is ready.
+
+### Current takeaway
+
+Before changing model architecture again, tighten temporal representation quality first: active-range-centered training windows plus shared short fixed-length resampling in both train and live.

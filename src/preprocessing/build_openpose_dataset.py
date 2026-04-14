@@ -27,6 +27,12 @@ from src.preprocessing.preprocess_constants import (
     SEQUENCE_LENGTH,
 )
 from src.preprocessing.runtime_preprocess import RuntimePreprocessor
+from src.preprocessing.temporal_resampling import (
+    TARGET_FPS,
+    TARGET_SEQUENCE_LENGTH,
+    crop_with_active_context,
+    resample_sequence_fixed_length,
+)
 from src.utils.paths import load_paths_config, resolve_path
 
 METADATA_COLUMNS = [
@@ -48,7 +54,7 @@ METADATA_COLUMNS = [
 class SampleResult:
     """Processed output for one take folder."""
 
-    sample_90x30: np.ndarray
+    sample_tx30: np.ndarray
     num_raw_frames: int
     num_bad_frames: int
     num_joint_zero_fallbacks: int
@@ -56,6 +62,8 @@ class SampleResult:
     num_joint_symmetric_fills: int
     used_future_fill_for_start: bool
     was_all_zero_sample: bool
+    used_active_range: bool
+    active_range_fallback: bool
 
 
 def _collect_take_frame_paths(take_dir: Path) -> list[Path]:
@@ -63,8 +71,15 @@ def _collect_take_frame_paths(take_dir: Path) -> list[Path]:
     return sorted(p for p in take_dir.iterdir() if p.is_file() and p.suffix == ".json")
 
 
-def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleResult:
-    """Convert one take folder into a fixed sample with shape (90, 30).
+def _build_sample_from_take(
+    *,
+    take_dir: Path,
+    confidence_cutoff: float,
+    gesture: str,
+    active_start_frame: int | None,
+    active_end_frame: int | None,
+) -> SampleResult:
+    """Convert one take folder into a fixed sample with shape (TARGET_SEQUENCE_LENGTH, 30).
 
     The take is replayed frame-by-frame through RuntimePreprocessor so dataset
     samples are built from the exact same causal preprocessing logic used live.
@@ -83,22 +98,34 @@ def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleR
             # whole-frame fallbacks (no person / no center / suspicious jump).
             num_bad_frames += 1
 
-    padding_count = max(0, SEQUENCE_LENGTH - len(causal_frames))
-    if padding_count > 0:
-        # Causal short-take padding: extend with the latest emitted runtime frame
-        # (or zeros if no frame was ever emitted), never with future interpolation.
-        if causal_frames:
-            pad_frame = causal_frames[-1].copy()
-        else:
-            pad_frame = np.zeros(FEATURES_PER_FRAME, dtype=np.float32)
-        for _ in range(padding_count):
-            causal_frames.append(pad_frame.copy())
-        num_bad_frames += padding_count
+    if not causal_frames:
+        causal_frames = [np.zeros(FEATURES_PER_FRAME, dtype=np.float32)]
+        num_bad_frames += 1
 
-    sample_90x30 = np.stack(causal_frames, axis=0).astype(np.float32)
+    causal_arr = np.stack(causal_frames, axis=0).astype(np.float32)
+
+    used_active_range = False
+    active_range_fallback = False
+    if gesture != "idle" and active_start_frame is not None and active_end_frame is not None:
+        working = crop_with_active_context(
+            causal_arr,
+            active_start_frame=active_start_frame,
+            active_end_frame=active_end_frame,
+        )
+        used_active_range = True
+    else:
+        # Fallback and idle path: deterministic full-span resample from replayed causal frames.
+        working = causal_arr
+        if gesture != "idle":
+            active_range_fallback = True
+
+    sample_tx30 = resample_sequence_fixed_length(
+        working,
+        target_sequence_length=TARGET_SEQUENCE_LENGTH,
+    ).astype(np.float32)
 
     return SampleResult(
-        sample_90x30=sample_90x30,
+        sample_tx30=sample_tx30,
         num_raw_frames=num_raw_frames,
         num_bad_frames=num_bad_frames,
         # Legacy metadata fields kept for compatibility; future-aware/interpolation
@@ -107,8 +134,35 @@ def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleR
         num_joint_interpolations=0,
         num_joint_symmetric_fills=0,
         used_future_fill_for_start=False,
-        was_all_zero_sample=bool(np.all(sample_90x30 == 0.0)),
+        was_all_zero_sample=bool(np.all(sample_tx30 == 0.0)),
+        used_active_range=used_active_range,
+        active_range_fallback=active_range_fallback,
     )
+
+
+def _load_active_ranges(manifest_path: Path) -> dict[tuple[str, str, str, str], tuple[int, int]]:
+    if not manifest_path.exists():
+        print(f"[preprocess] Active-range manifest not found (will fallback): {manifest_path}")
+        return {}
+
+    df = pd.read_csv(manifest_path)
+    required = {"gesture", "person", "session", "take", "active_start_frame", "active_end_frame"}
+    missing = required.difference(df.columns)
+    if missing:
+        print(f"[preprocess] Active-range manifest missing columns {sorted(missing)} (will fallback).")
+        return {}
+
+    mapping: dict[tuple[str, str, str, str], tuple[int, int]] = {}
+    for _, row in df.iterrows():
+        try:
+            key = (str(row["gesture"]), str(row["person"]), str(row["session"]), str(row["take"]))
+            start = int(row["active_start_frame"])
+            end = int(row["active_end_frame"])
+        except (TypeError, ValueError):
+            continue
+        mapping[key] = (start, end)
+    print(f"[preprocess] Loaded {len(mapping)} active-range entries from: {manifest_path}")
+    return mapping
 
 
 def _discover_take_dirs(openpose_root: Path, allowed_gestures: list[str]) -> list[tuple[str, str, str, str, Path]]:
@@ -187,6 +241,7 @@ def inspect_processed_sample(processed_dir: Path, sample_index: int = 0) -> None
 
 def build_openpose_dataset(
     confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+    active_manifest_path: str | None = None,
     inspect_index: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Main preprocessing entry point for OpenPose raw JSON -> processed tensors."""
@@ -207,6 +262,9 @@ def build_openpose_dataset(
 
     takes = _discover_take_dirs(openpose_root, active_labels)
     print(f"[preprocess] Found {len(takes)} take folders under: {openpose_root}")
+    default_manifest_path = openpose_root / "active_gesture_ranges.csv"
+    manifest_path = resolve_path(active_manifest_path) if active_manifest_path else default_manifest_path
+    active_ranges = _load_active_ranges(manifest_path)
 
     samples_x: list[np.ndarray] = []
     labels_y: list[int] = []
@@ -214,17 +272,31 @@ def build_openpose_dataset(
 
     per_class_counts = {name: 0 for name in active_labels}
     total_bad_frames = 0
+    gesture_with_active_range = 0
+    gesture_fallback_count = 0
+    idle_count = 0
 
     for gesture, person, session, take, take_dir in takes:
+        active_key = (gesture, person, session, take)
+        active_span = active_ranges.get(active_key)
         result = _build_sample_from_take(
             take_dir=take_dir,
             confidence_cutoff=confidence_cutoff,
+            gesture=gesture,
+            active_start_frame=active_span[0] if active_span else None,
+            active_end_frame=active_span[1] if active_span else None,
         )
 
-        samples_x.append(result.sample_90x30)
+        samples_x.append(result.sample_tx30)
         labels_y.append(label_to_id[gesture])
         per_class_counts[gesture] += 1
         total_bad_frames += result.num_bad_frames
+        if gesture == "idle":
+            idle_count += 1
+        elif result.used_active_range:
+            gesture_with_active_range += 1
+        elif result.active_range_fallback:
+            gesture_fallback_count += 1
 
         metadata_rows.append(
             {
@@ -247,7 +319,7 @@ def build_openpose_dataset(
         x = np.stack(samples_x, axis=0).astype(np.float32)
         y = np.asarray(labels_y, dtype=np.int32)
     else:
-        x = np.zeros((0, SEQUENCE_LENGTH, FEATURES_PER_FRAME), dtype=np.float32)
+        x = np.zeros((0, TARGET_SEQUENCE_LENGTH, FEATURES_PER_FRAME), dtype=np.float32)
         y = np.zeros((0,), dtype=np.int32)
 
     metadata_df = pd.DataFrame(metadata_rows, columns=METADATA_COLUMNS)
@@ -266,6 +338,18 @@ def build_openpose_dataset(
         print(f"  - {class_name}: {per_class_counts[class_name]}")
 
     print(f"[preprocess] Total bad frames repaired: {total_bad_frames}")
+    print(
+        "[preprocess] Active-range usage (non-idle): "
+        f"used={gesture_with_active_range}, fallback={gesture_fallback_count}"
+    )
+    print(
+        "[preprocess] Idle handling: "
+        f"deterministic full-span resample to {TARGET_SEQUENCE_LENGTH} frames for {idle_count} takes"
+    )
+    print(
+        "[preprocess] Temporal policy: "
+        f"target_fps={TARGET_FPS:.1f}, target_sequence_length={TARGET_SEQUENCE_LENGTH}"
+    )
     print(f"[preprocess] Final X shape: {x.shape}")
     print(f"[preprocess] Final y shape: {y.shape}")
     print(f"[preprocess] Saved to: {processed_root}")
@@ -292,6 +376,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional sample index to inspect after writing outputs.",
     )
+    parser.add_argument(
+        "--active-manifest-path",
+        type=str,
+        default="",
+        help=(
+            "Optional active-range CSV manifest path. "
+            "Default: <openpose_raw_dir>/active_gesture_ranges.csv."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -299,6 +392,7 @@ def main() -> None:
     args = parse_args()
     build_openpose_dataset(
         confidence_cutoff=args.confidence_cutoff,
+        active_manifest_path=args.active_manifest_path or None,
         inspect_index=args.inspect_index,
     )
 

@@ -20,8 +20,15 @@ from typing import Any
 import numpy as np
 from tensorflow import keras
 
-from src.preprocessing.build_openpose_dataset import FEATURES_PER_FRAME, SEQUENCE_LENGTH
+from src.preprocessing.preprocess_constants import FEATURES_PER_FRAME
 from src.preprocessing.runtime_preprocess import RuntimePreprocessor
+from src.preprocessing.temporal_resampling import (
+    SOURCE_NOMINAL_FPS,
+    TARGET_FPS,
+    TARGET_SEQUENCE_LENGTH,
+    resample_sequence_fixed_length,
+    source_window_frames_for_target_span,
+)
 from src.utils.paths import load_paths_config, resolve_path
 
 try:
@@ -398,7 +405,8 @@ def main() -> None:
         tracking_mode=args.tracking_mode,
     )
 
-    rolling: deque[np.ndarray] = deque(maxlen=SEQUENCE_LENGTH)
+    live_source_window_frames = source_window_frames_for_target_span()
+    rolling: deque[np.ndarray] = deque(maxlen=live_source_window_frames)
     ema_probs: np.ndarray | None = None
     seen_files: set[str] = set()
     print_every_n = max(1, int(args.print_every_n))
@@ -482,6 +490,11 @@ def main() -> None:
         "(NO_ACTION or idle raw/smoothed or smoothed gate confidence below threshold)"
     )
     print(f"Intended label: {intended_label or '(none)'}")
+    print(
+        "Temporal input policy: "
+        f"source_window={live_source_window_frames} frames (~{SOURCE_NOMINAL_FPS:.1f}fps source), "
+        f"resampled_to={TARGET_SEQUENCE_LENGTH} frames at {TARGET_FPS:.1f}fps target."
+    )
     print("Press Ctrl+C to stop.\n")
 
     total_frames = 0
@@ -553,15 +566,15 @@ def main() -> None:
                 rolling.append(frame_result.features_30)
                 fill = len(rolling)
 
-                if fill < SEQUENCE_LENGTH:
+                if fill < live_source_window_frames:
                     warmup_frames += 1
                     should_print_warmup = (
                         not args.quiet_warmup
-                        and (warmup_frames % print_every_n == 0 or fill == SEQUENCE_LENGTH - 1)
+                        and (warmup_frames % print_every_n == 0 or fill == live_source_window_frames - 1)
                     )
                     if should_print_warmup:
                         print(
-                            f"[warmup {fill:>2}/{SEQUENCE_LENGTH}] frame={frame_path.name} "
+                            f"[warmup {fill:>2}/{live_source_window_frames}] frame={frame_path.name} "
                             f"| miss={missing_joints:>2} joint_fix={'Y' if frame_result.had_joint_repair else 'N'} "
                             f"prev_copy={'Y' if frame_result.used_prev_frame_copy else 'N'} "
                             f"susp={'Y' if frame_result.suspicious_jump else 'N'} "
@@ -572,7 +585,7 @@ def main() -> None:
                         {
                             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                             "frame_file": frame_path.name,
-                            "buffer_fill": f"{fill}/{SEQUENCE_LENGTH}",
+                            "buffer_fill": f"{fill}/{live_source_window_frames}",
                             "raw_prediction": "",
                             "smoothed_prediction": "",
                             "top1_label": "",
@@ -621,7 +634,11 @@ def main() -> None:
                     csv_file.flush()
                     continue
 
-                x_window = np.stack(rolling, axis=0).reshape(1, SEQUENCE_LENGTH, FEATURES_PER_FRAME)
+                x_resampled = resample_sequence_fixed_length(
+                    np.stack(rolling, axis=0),
+                    target_sequence_length=TARGET_SEQUENCE_LENGTH,
+                )
+                x_window = x_resampled.reshape(1, TARGET_SEQUENCE_LENGTH, FEATURES_PER_FRAME)
                 x_flat = x_window.reshape(1, -1)
 
                 raw_probs = model.predict(x_flat, verbose=0)[0].astype(np.float32)
@@ -727,7 +744,7 @@ def main() -> None:
                 if effective_overlay_mode in {"terminal", "both"}:
                     print_terminal_overlay(
                         frame_file=frame_path.name,
-                        buffer_fill=f"{fill}/{SEQUENCE_LENGTH}",
+                        buffer_fill=f"{fill}/{live_source_window_frames}",
                         raw_label=raw_label,
                         smoothed_label=smoothed_label,
                         gate_top1_label=smoothed_top1_label,
@@ -815,7 +832,7 @@ def main() -> None:
                     {
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                         "frame_file": frame_path.name,
-                        "buffer_fill": f"{fill}/{SEQUENCE_LENGTH}",
+                        "buffer_fill": f"{fill}/{live_source_window_frames}",
                         "raw_prediction": raw_label,
                         "smoothed_prediction": smoothed_label,
                         "top1_label": raw_top1_label,

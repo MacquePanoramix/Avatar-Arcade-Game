@@ -279,12 +279,12 @@ Each take folder is treated as one sample.
 
 The command writes:
 
-- `data/processed/X.npy` with shape `(N, 90, 30)`
+- `data/processed/X.npy` with shape `(N, 24, 30)`
 - `data/processed/y.npy` with shape `(N,)`
 - `data/processed/metadata.csv` (one row per sample)
 - `data/processed/label_map.json` (target mode + label mappings)
 
-### Causal preprocessing alignment (dataset build + live runtime)
+### Active-range-aware temporal resampling (dataset build + live runtime)
 
 - Uses an upper-body BODY_25 subset (15 joints), `x,y` only.
 - Uses `Neck` as center anchor with `MidHip` fallback.
@@ -293,8 +293,11 @@ The command writes:
 - Marks likely identity-switch/catastrophic jumps as bad frames.
 - Dataset building now replays each take frame-by-frame through `RuntimePreprocessor` (the same causal logic used in live inference).
 - No future-frame interpolation/future-fill is used during dataset creation.
-- Short takes are padded causally by repeating the latest emitted runtime frame (or zeros if no frame was emitted).
-- This reduces train/live preprocessing mismatch so offline metrics better reflect live behavior.
+- For non-idle gestures, dataset build reads `data/raw/openpose_json/active_gesture_ranges.csv` (or `--active-manifest-path`) and crops around `active_start_frame`/`active_end_frame` with context before resampling.
+- For idle gestures, dataset build uses deterministic full-span resampling (no active-range dependency).
+- Training and live inference now share one temporal policy (`src/preprocessing/temporal_resampling.py`): target FPS `10.0`, nominal source FPS `15.0`, fixed model length `24`.
+- Live inference keeps a rolling recent source window, then resamples to the same 24-frame representation before model inference.
+- This reduces idle filler, reduces FPS mismatch impact, and lowers effective live delay while keeping fixed-length model input.
 
 ## Baseline training runs (LSTM + MLP)
 
@@ -312,7 +315,7 @@ python -m src.training.train_lstm --model-type mlp
 
 MLP note:
 
-- Each sample is flattened from `(90, 30)` into `2700` input features before classification.
+- Each sample is flattened from `(24, 30)` into `720` input features before classification.
 - The script reuses the same saved split files in `data/splits/*.npy` (when present) so LSTM vs MLP comparisons stay fair.
 
 Expected processed inputs (must already exist):
