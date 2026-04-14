@@ -175,6 +175,26 @@ If any condition fails, decision is `NO_ACTION`.
 This is by design for debugging/prototype deployment where underreaction is safer than overreaction.
 Raw per-frame probabilities remain fully visible in terminal/HUD/CSV for diagnostics, but they no longer directly drive ACCEPT/TRIGGER gating.
 
+Live temporal input construction is now closer to the training pipeline:
+
+- Training non-idle samples are active-range-aware contiguous crops with context, then fixed resampling.
+- Live now tracks a recent **contiguous motion-active span** and, when available, builds classifier input from that span plus small context before resampling.
+- If no valid active span is available yet, live safely falls back to the rolling recent-window path.
+- Final model input contract is unchanged: `(1, 24, 30)` before flattening (MLP flatten: `(1, 720)`).
+
+Live can also estimate runtime FPS from actual incoming frame timing:
+
+- enable with `--auto-live-fps`
+- keeps `--live-source-fps` as initial/manual fallback
+- smooths the estimate and clamps to a safe range
+- uses estimated FPS for live source-window sizing so temporal coverage adapts when OpenPose throughput fluctuates
+
+Motion is a **live helper signal only**, not a model class:
+
+- `motion_score_raw` and `motion_score_smoothed` are computed from consecutive causal feature vectors
+- a hysteresis `motion_active` boolean is derived for diagnostics/gating
+- with `--require-motion-for-nonidle` enabled (default), non-idle trigger decisions are suppressed when motion is inactive
+
 ### Temporal TRIGGER/NO_TRIGGER layer (gameplay-style output)
 
 `ACCEPT` / `NO_ACTION` is a **frame-level confidence gate**.  
@@ -205,8 +225,25 @@ Useful flags:
 - `--trigger-cooldown-frames 15`
 - `--release-idle-frames 3`
 - `--live-source-fps 11` (default `11.0`; set this to your observed OpenPose live FPS)
+- `--auto-live-fps` (estimate/smooth live FPS from incoming frame timing)
+- `--require-motion-for-nonidle` / `--no-require-motion-for-nonidle`
 - `--overlay-mode terminal|window|both|none` (default: `terminal`)
 - `--no-overlay` (equivalent to `--overlay-mode none`)
+
+Example with dynamic FPS + motion-aware non-idle gating:
+
+```bash
+python -m src.inference.live_openpose_debug \
+  --json-dir data/raw/live_buffer/openpose_session/live_attack_earth_20260412_220500 \
+  --model-path models/checkpoints/best_mlp.keras \
+  --tracking-mode single_person \
+  --auto-live-fps \
+  --require-motion-for-nonidle \
+  --accept-threshold 0.80 \
+  --margin-threshold 0.20 \
+  --trigger-streak 3 \
+  --trigger-cooldown-frames 15
+```
 
 Window HUD example:
 

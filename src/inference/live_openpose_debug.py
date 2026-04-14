@@ -14,6 +14,7 @@ import json
 import time
 from collections import Counter, deque
 from datetime import datetime, timezone
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -169,6 +170,80 @@ def parse_args() -> argparse.Namespace:
             "(default: 11.0)."
         ),
     )
+    parser.add_argument(
+        "--auto-live-fps",
+        action="store_true",
+        help=(
+            "Estimate live source FPS from incoming frame timing and use it for temporal window sizing "
+            "(default: disabled)."
+        ),
+    )
+    parser.add_argument(
+        "--fps-ema-alpha",
+        type=float,
+        default=0.90,
+        help="EMA carry factor for estimated live FPS smoothing (0..1, higher = smoother).",
+    )
+    parser.add_argument(
+        "--min-live-fps",
+        type=float,
+        default=5.0,
+        help="Minimum clamp for estimated live FPS (default: 5.0).",
+    )
+    parser.add_argument(
+        "--max-live-fps",
+        type=float,
+        default=15.0,
+        help="Maximum clamp for estimated live FPS (default: 15.0).",
+    )
+    parser.add_argument(
+        "--motion-ema-alpha",
+        type=float,
+        default=0.85,
+        help="EMA carry factor for motion-energy smoothing (0..1, higher = smoother).",
+    )
+    parser.add_argument(
+        "--motion-threshold-on",
+        type=float,
+        default=0.030,
+        help="Smoothed motion threshold to turn motion_active ON (default: 0.030).",
+    )
+    parser.add_argument(
+        "--motion-threshold-off",
+        type=float,
+        default=0.022,
+        help="Smoothed motion threshold to turn motion_active OFF (default: 0.022).",
+    )
+    parser.add_argument(
+        "--motion-on-min-consecutive",
+        type=int,
+        default=2,
+        help="Consecutive frames above motion-threshold-on required to activate motion (default: 2).",
+    )
+    parser.add_argument(
+        "--active-span-min-frames",
+        type=int,
+        default=4,
+        help="Minimum contiguous motion-active frames required to use active-span classifier mode (default: 4).",
+    )
+    parser.add_argument(
+        "--active-span-context-before-sec",
+        type=float,
+        default=0.25,
+        help="Seconds of context to include before detected contiguous active span (default: 0.25).",
+    )
+    parser.add_argument(
+        "--active-span-context-after-sec",
+        type=float,
+        default=0.10,
+        help="Seconds of context to include after detected contiguous active span (default: 0.10).",
+    )
+    parser.add_argument(
+        "--require-motion-for-nonidle",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require motion_active for non-idle ACCEPT decisions (default: enabled).",
+    )
     return parser.parse_args()
 
 
@@ -228,6 +303,76 @@ def decide_action(
     return "NO_ACTION", "NO_ACTION", margin
 
 
+def update_estimated_live_fps(
+    *,
+    now_ts: float,
+    prev_ts: float | None,
+    prev_fps: float,
+    ema_alpha: float,
+    min_fps: float,
+    max_fps: float,
+) -> tuple[float, float | None]:
+    if prev_ts is None:
+        return float(np.clip(prev_fps, min_fps, max_fps)), None
+    dt = now_ts - prev_ts
+    if dt <= 1e-6:
+        return float(np.clip(prev_fps, min_fps, max_fps)), None
+    instant_fps = float(np.clip(1.0 / dt, min_fps, max_fps))
+    estimated = float((ema_alpha * prev_fps) + ((1.0 - ema_alpha) * instant_fps))
+    estimated = float(np.clip(estimated, min_fps, max_fps))
+    return estimated, instant_fps
+
+
+def find_recent_motion_active_span(motion_flags: list[bool]) -> tuple[int, int] | None:
+    if not motion_flags:
+        return None
+    end_idx = len(motion_flags) - 1
+    while end_idx >= 0 and not motion_flags[end_idx]:
+        end_idx -= 1
+    if end_idx < 0:
+        return None
+    start_idx = end_idx
+    while start_idx > 0 and motion_flags[start_idx - 1]:
+        start_idx -= 1
+    return start_idx, end_idx
+
+
+def build_live_active_span_window(
+    *,
+    features: list[np.ndarray],
+    motion_flags: list[bool],
+    current_live_fps: float,
+    context_before_sec: float,
+    context_after_sec: float,
+    min_active_frames: int,
+) -> tuple[np.ndarray | None, dict[str, int | str | None]]:
+    span = find_recent_motion_active_span(motion_flags)
+    meta: dict[str, int | str | None] = {
+        "source_mode": "fallback_recent_window",
+        "active_span_start_index": None,
+        "active_span_end_index": None,
+        "active_span_length_frames": 0,
+    }
+    if span is None:
+        return None, meta
+
+    start_idx, end_idx = span
+    active_len = (end_idx - start_idx) + 1
+    meta["active_span_start_index"] = int(start_idx)
+    meta["active_span_end_index"] = int(end_idx)
+    meta["active_span_length_frames"] = int(active_len)
+    if active_len < min_active_frames:
+        return None, meta
+
+    context_before = max(0, int(round(context_before_sec * current_live_fps)))
+    context_after = max(0, int(round(context_after_sec * current_live_fps)))
+    crop_start = max(0, start_idx - context_before)
+    crop_end = min(len(features) - 1, end_idx + context_after)
+    crop = np.stack(features[crop_start : crop_end + 1], axis=0)
+    meta["source_mode"] = "active_span"
+    return crop, meta
+
+
 def print_terminal_overlay(
     *,
     frame_file: str,
@@ -255,6 +400,11 @@ def print_terminal_overlay(
     selected_left_person_index: int | None,
     selected_right_person_index: int | None,
     intended_label: str,
+    estimated_live_fps: float,
+    motion_score_smoothed: float,
+    motion_active: bool,
+    active_span_length_frames: int,
+    source_mode: str,
 ) -> None:
     line = (
         f"frame={frame_file} | fill={buffer_fill} | raw={raw_label} | smooth={smoothed_label} | "
@@ -267,6 +417,8 @@ def print_terminal_overlay(
         f"tracking={tracking_mode} "
         f"people={detected_people_count} sel={selected_person_index} "
         f"L={selected_left_person_index} R={selected_right_person_index} "
+        f"| fps={estimated_live_fps:.2f} motion={motion_score_smoothed:.3f}/{'Y' if motion_active else 'N'} "
+        f"span={active_span_length_frames} src={source_mode} "
         f"| intended={intended_label or '-'}"
     )
     print(line, flush=True)
@@ -298,6 +450,11 @@ def draw_window_overlay(
     selected_right_person_index: int | None,
     intended_label: str,
     severe_fallback: bool,
+    estimated_live_fps: float,
+    motion_score_smoothed: float,
+    motion_active: bool,
+    active_span_length_frames: int,
+    source_mode: str,
 ) -> None:
     if cv2 is None:
         return
@@ -368,6 +525,29 @@ def draw_window_overlay(
         cv2.LINE_AA,
     )
     cv2.putText(canvas, f"intended={intended_label or '-'}", (40, 630), cv2.FONT_HERSHEY_SIMPLEX, 0.95, white, 2, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        (
+            f"estimated_live_fps={estimated_live_fps:.2f}   "
+            f"motion_score={motion_score_smoothed:.3f}   motion_active={'Y' if motion_active else 'N'}"
+        ),
+        (40, 690),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        white,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"input_source={source_mode}   active_span_length={active_span_length_frames}",
+        (40, 740),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        white,
+        2,
+        cv2.LINE_AA,
+    )
     cv2.putText(canvas, f"frame: {frame_file}", (40, 860), cv2.FONT_HERSHEY_SIMPLEX, 0.65, gray, 1, cv2.LINE_AA)
     cv2.imshow("Live Gesture HUD", canvas)
     cv2.waitKey(1)
@@ -388,6 +568,22 @@ def main() -> None:
         raise ValueError("--release-idle-frames must be >= 1.")
     if args.live_source_fps <= 0:
         raise ValueError("--live-source-fps must be > 0.")
+    if args.fps_ema_alpha < 0 or args.fps_ema_alpha > 1:
+        raise ValueError("--fps-ema-alpha must be in [0, 1].")
+    if args.motion_ema_alpha < 0 or args.motion_ema_alpha > 1:
+        raise ValueError("--motion-ema-alpha must be in [0, 1].")
+    if args.min_live_fps <= 0 or args.max_live_fps <= 0 or args.max_live_fps < args.min_live_fps:
+        raise ValueError("--min-live-fps and --max-live-fps must be > 0 and max>=min.")
+    if args.motion_threshold_off < 0 or args.motion_threshold_on < 0:
+        raise ValueError("--motion-threshold-on/off must be >= 0.")
+    if args.motion_threshold_on < args.motion_threshold_off:
+        raise ValueError("--motion-threshold-on must be >= --motion-threshold-off for hysteresis.")
+    if args.motion_on_min_consecutive < 1:
+        raise ValueError("--motion-on-min-consecutive must be >= 1.")
+    if args.active_span_min_frames < 1:
+        raise ValueError("--active-span-min-frames must be >= 1.")
+    if args.active_span_context_before_sec < 0 or args.active_span_context_after_sec < 0:
+        raise ValueError("--active-span-context-before-sec/after-sec must be >= 0.")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -417,13 +613,29 @@ def main() -> None:
     )
 
     live_source_fps = float(args.live_source_fps)
-    live_source_window_frames = source_window_frames_for_target_span(
+    max_live_fps_for_buffer = float(args.max_live_fps) if args.auto_live_fps else live_source_fps
+    max_source_window_frames = source_window_frames_for_target_span(
         target_sequence_length=TARGET_SEQUENCE_LENGTH,
-        source_nominal_fps=live_source_fps,
+        source_nominal_fps=max_live_fps_for_buffer,
         target_fps=TARGET_FPS,
     )
-    rolling: deque[np.ndarray] = deque(maxlen=live_source_window_frames)
+    max_context_frames = int(
+        ceil(max_live_fps_for_buffer * max(args.active_span_context_before_sec, args.active_span_context_after_sec))
+    )
+    rolling_capacity = max_source_window_frames + max_context_frames + 8
+    rolling: deque[np.ndarray] = deque(maxlen=rolling_capacity)
+    motion_flags: deque[bool] = deque(maxlen=rolling_capacity)
     ema_probs: np.ndarray | None = None
+    estimated_live_fps = live_source_fps
+    prev_frame_ts: float | None = None
+    instantaneous_live_fps: float | None = None
+    fps_sum = 0.0
+    fps_count = 0
+    fps_min_seen: float | None = None
+    fps_max_seen: float | None = None
+    motion_score_smoothed = 0.0
+    motion_active = False
+    motion_on_run = 0
     seen_files: set[str] = set()
     print_every_n = max(1, int(args.print_every_n))
     summary_path = summary_path_from_csv(log_csv_path)
@@ -479,8 +691,19 @@ def main() -> None:
             "trigger_lock_was_off",
             "overlay_mode",
             "release_idle_frames",
+            "auto_live_fps_enabled",
+            "estimated_live_fps",
+            "instantaneous_live_fps",
             "live_source_fps",
             "live_source_window_frames",
+            "live_source_window_frames_current",
+            "motion_score_raw",
+            "motion_score_smoothed",
+            "motion_active",
+            "active_span_start_index",
+            "active_span_end_index",
+            "active_span_length_frames",
+            "classifier_input_source_mode",
         ],
     )
     writer.writeheader()
@@ -511,10 +734,21 @@ def main() -> None:
     print(
         "Temporal input policy: "
         f"target_fps={TARGET_FPS:.1f}, "
-        f"live_source_fps={live_source_fps:.1f} "
+        f"live_source_fps_initial={live_source_fps:.1f} "
+        f"auto_live_fps={'ON' if args.auto_live_fps else 'OFF'} "
+        f"(clamp {args.min_live_fps:.1f}-{args.max_live_fps:.1f}), "
         f"(shared nominal default={SOURCE_NOMINAL_FPS:.1f}), "
-        f"source_window_frames={live_source_window_frames}, "
+        f"max_source_window_frames={max_source_window_frames}, "
         f"target_sequence_length={TARGET_SEQUENCE_LENGTH}."
+    )
+    print(
+        "Motion helper policy: "
+        f"threshold_on={args.motion_threshold_on:.4f}, threshold_off={args.motion_threshold_off:.4f}, "
+        f"on_min_consecutive={args.motion_on_min_consecutive}, "
+        f"active_span_min_frames={args.active_span_min_frames}, "
+        f"context_before={args.active_span_context_before_sec:.2f}s, "
+        f"context_after={args.active_span_context_after_sec:.2f}s, "
+        f"require_motion_for_nonidle={'ON' if args.require_motion_for_nonidle else 'OFF'}."
     )
     print("Press Ctrl+C to stop.\n")
 
@@ -584,29 +818,78 @@ def main() -> None:
                 if frame_result.suspicious_jump:
                     suspicious_frames += 1
 
+                now_ts = time.perf_counter()
+                if args.auto_live_fps:
+                    estimated_live_fps, instantaneous_live_fps = update_estimated_live_fps(
+                        now_ts=now_ts,
+                        prev_ts=prev_frame_ts,
+                        prev_fps=estimated_live_fps,
+                        ema_alpha=float(args.fps_ema_alpha),
+                        min_fps=float(args.min_live_fps),
+                        max_fps=float(args.max_live_fps),
+                    )
+                else:
+                    instantaneous_live_fps = None
+                    estimated_live_fps = live_source_fps
+                prev_frame_ts = now_ts
+                fps_sum += estimated_live_fps
+                fps_count += 1
+                fps_min_seen = estimated_live_fps if fps_min_seen is None else min(fps_min_seen, estimated_live_fps)
+                fps_max_seen = estimated_live_fps if fps_max_seen is None else max(fps_max_seen, estimated_live_fps)
+
                 rolling.append(frame_result.features_30)
                 fill = len(rolling)
 
-                if fill < live_source_window_frames:
+                live_source_window_frames_current = source_window_frames_for_target_span(
+                    target_sequence_length=TARGET_SEQUENCE_LENGTH,
+                    source_nominal_fps=estimated_live_fps,
+                    target_fps=TARGET_FPS,
+                )
+
+                prev_features = rolling[-2] if len(rolling) >= 2 else rolling[-1]
+                motion_score_raw = float(np.mean(np.abs(rolling[-1] - prev_features)))
+                motion_score_smoothed = (
+                    (float(args.motion_ema_alpha) * motion_score_smoothed)
+                    + ((1.0 - float(args.motion_ema_alpha)) * motion_score_raw)
+                )
+                if motion_active:
+                    if motion_score_smoothed <= args.motion_threshold_off:
+                        motion_active = False
+                        motion_on_run = 0
+                else:
+                    if motion_score_smoothed >= args.motion_threshold_on:
+                        motion_on_run += 1
+                        if motion_on_run >= args.motion_on_min_consecutive:
+                            motion_active = True
+                            motion_on_run = 0
+                    else:
+                        motion_on_run = 0
+                motion_flags.append(bool(motion_active))
+
+                if fill < live_source_window_frames_current:
                     warmup_frames += 1
                     should_print_warmup = (
                         not args.quiet_warmup
-                        and (warmup_frames % print_every_n == 0 or fill == live_source_window_frames - 1)
+                        and (
+                            warmup_frames % print_every_n == 0
+                            or fill == live_source_window_frames_current - 1
+                        )
                     )
                     if should_print_warmup:
                         print(
-                            f"[warmup {fill:>2}/{live_source_window_frames}] frame={frame_path.name} "
+                            f"[warmup {fill:>2}/{live_source_window_frames_current}] frame={frame_path.name} "
                             f"| miss={missing_joints:>2} joint_fix={'Y' if frame_result.had_joint_repair else 'N'} "
                             f"prev_copy={'Y' if frame_result.used_prev_frame_copy else 'N'} "
                             f"susp={'Y' if frame_result.suspicious_jump else 'N'} "
                             f"people={frame_result.detected_people_count:>2} "
-                            f"sel={frame_result.selected_person_index}"
+                            f"sel={frame_result.selected_person_index} "
+                            f"| fps={estimated_live_fps:.2f} motion={motion_score_smoothed:.3f}/{int(motion_active)}"
                         )
                     writer.writerow(
                         {
                             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                             "frame_file": frame_path.name,
-                            "buffer_fill": f"{fill}/{live_source_window_frames}",
+                            "buffer_fill": f"{fill}/{live_source_window_frames_current}",
                             "raw_prediction": "",
                             "smoothed_prediction": "",
                             "top1_label": "",
@@ -633,7 +916,7 @@ def main() -> None:
                             "smoothed_top2_label": "",
                             "smoothed_top2_prob": "",
                             "smoothed_top1_margin": "",
-                            "decision_source": "smoothed_probs",
+                            "decision_source": "warmup",
                             "decision_label": "",
                             "decision_status": "",
                             "accept_threshold": args.accept_threshold,
@@ -650,15 +933,40 @@ def main() -> None:
                             "trigger_lock_was_off": "",
                             "overlay_mode": effective_overlay_mode,
                             "release_idle_frames": args.release_idle_frames,
+                            "auto_live_fps_enabled": int(args.auto_live_fps),
+                            "estimated_live_fps": estimated_live_fps,
+                            "instantaneous_live_fps": "" if instantaneous_live_fps is None else instantaneous_live_fps,
                             "live_source_fps": live_source_fps,
-                            "live_source_window_frames": live_source_window_frames,
+                            "live_source_window_frames": max_source_window_frames,
+                            "live_source_window_frames_current": live_source_window_frames_current,
+                            "motion_score_raw": motion_score_raw,
+                            "motion_score_smoothed": motion_score_smoothed,
+                            "motion_active": int(motion_active),
+                            "active_span_start_index": "",
+                            "active_span_end_index": "",
+                            "active_span_length_frames": 0,
+                            "classifier_input_source_mode": "warmup",
                         }
                     )
                     csv_file.flush()
                     continue
 
+                active_window, active_meta = build_live_active_span_window(
+                    features=list(rolling),
+                    motion_flags=list(motion_flags),
+                    current_live_fps=estimated_live_fps,
+                    context_before_sec=float(args.active_span_context_before_sec),
+                    context_after_sec=float(args.active_span_context_after_sec),
+                    min_active_frames=int(args.active_span_min_frames),
+                )
+                classifier_input_source_mode = str(active_meta["source_mode"])
+                if active_window is None:
+                    fallback_window = np.stack(list(rolling)[-live_source_window_frames_current:], axis=0)
+                    source_window = fallback_window
+                else:
+                    source_window = active_window
                 x_resampled = resample_sequence_fixed_length(
-                    np.stack(rolling, axis=0),
+                    source_window,
                     target_sequence_length=TARGET_SEQUENCE_LENGTH,
                 )
                 x_window = x_resampled.reshape(1, TARGET_SEQUENCE_LENGTH, FEATURES_PER_FRAME)
@@ -708,6 +1016,16 @@ def main() -> None:
                     accept_threshold=float(args.accept_threshold),
                     margin_threshold=float(args.margin_threshold),
                 )
+                decision_source = "smoothed_probs"
+                if (
+                    args.require_motion_for_nonidle
+                    and decision_status == "ACCEPT"
+                    and decision_label not in {"", "idle", "NO_ACTION"}
+                    and not motion_active
+                ):
+                    decision_label = "NO_ACTION"
+                    decision_status = "NO_ACTION"
+                    decision_source = "smoothed_probs_motion_gated"
                 decision_status_counts[decision_status] += 1
                 decision_label_counts[decision_label] += 1
                 is_valid_accept = (
@@ -767,7 +1085,7 @@ def main() -> None:
                 if effective_overlay_mode in {"terminal", "both"}:
                     print_terminal_overlay(
                         frame_file=frame_path.name,
-                        buffer_fill=f"{fill}/{live_source_window_frames}",
+                        buffer_fill=f"{fill}/{live_source_window_frames_current}",
                         raw_label=raw_label,
                         smoothed_label=smoothed_label,
                         gate_top1_label=smoothed_top1_label,
@@ -791,6 +1109,11 @@ def main() -> None:
                         selected_left_person_index=frame_result.selected_left_person_index,
                         selected_right_person_index=frame_result.selected_right_person_index,
                         intended_label=intended_label,
+                        estimated_live_fps=estimated_live_fps,
+                        motion_score_smoothed=motion_score_smoothed,
+                        motion_active=motion_active,
+                        active_span_length_frames=int(active_meta["active_span_length_frames"]),
+                        source_mode=classifier_input_source_mode,
                     )
                 if effective_overlay_mode in {"window", "both"}:
                     draw_window_overlay(
@@ -818,6 +1141,11 @@ def main() -> None:
                         selected_right_person_index=frame_result.selected_right_person_index,
                         intended_label=intended_label,
                         severe_fallback=severe_fallback,
+                        estimated_live_fps=estimated_live_fps,
+                        motion_score_smoothed=motion_score_smoothed,
+                        motion_active=motion_active,
+                        active_span_length_frames=int(active_meta["active_span_length_frames"]),
+                        source_mode=classifier_input_source_mode,
                     )
 
                 if inference_frames % print_every_n == 0:
@@ -837,6 +1165,10 @@ def main() -> None:
                         f"cooldown={current_cooldown_remaining} "
                         f"lock={'Y' if trigger_locked else 'N'} "
                         f"release={release_counter}/{args.release_idle_frames} "
+                        f"fps={estimated_live_fps:.2f} "
+                        f"motion={motion_score_smoothed:.3f}/{int(motion_active)} "
+                        f"active_span_len={int(active_meta['active_span_length_frames'])} "
+                        f"src={classifier_input_source_mode} "
                         f"| people={frame_result.detected_people_count} "
                         f"sel={frame_result.selected_person_index} "
                         f"L={frame_result.selected_left_person_index} "
@@ -855,7 +1187,7 @@ def main() -> None:
                     {
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                         "frame_file": frame_path.name,
-                        "buffer_fill": f"{fill}/{live_source_window_frames}",
+                        "buffer_fill": f"{fill}/{live_source_window_frames_current}",
                         "raw_prediction": raw_label,
                         "smoothed_prediction": smoothed_label,
                         "top1_label": raw_top1_label,
@@ -882,7 +1214,7 @@ def main() -> None:
                         "smoothed_top2_label": smoothed_top2_label,
                         "smoothed_top2_prob": smoothed_top2_prob,
                         "smoothed_top1_margin": top1_margin,
-                        "decision_source": "smoothed_probs",
+                        "decision_source": decision_source,
                         "decision_label": decision_label,
                         "decision_status": decision_status,
                         "accept_threshold": args.accept_threshold,
@@ -899,8 +1231,19 @@ def main() -> None:
                         "trigger_lock_was_off": trigger_lock_was_off,
                         "overlay_mode": effective_overlay_mode,
                         "release_idle_frames": args.release_idle_frames,
+                        "auto_live_fps_enabled": int(args.auto_live_fps),
+                        "estimated_live_fps": estimated_live_fps,
+                        "instantaneous_live_fps": "" if instantaneous_live_fps is None else instantaneous_live_fps,
                         "live_source_fps": live_source_fps,
-                        "live_source_window_frames": live_source_window_frames,
+                        "live_source_window_frames": max_source_window_frames,
+                        "live_source_window_frames_current": live_source_window_frames_current,
+                        "motion_score_raw": motion_score_raw,
+                        "motion_score_smoothed": motion_score_smoothed,
+                        "motion_active": int(motion_active),
+                        "active_span_start_index": active_meta["active_span_start_index"],
+                        "active_span_end_index": active_meta["active_span_end_index"],
+                        "active_span_length_frames": active_meta["active_span_length_frames"],
+                        "classifier_input_source_mode": classifier_input_source_mode,
                     }
                 )
                 csv_file.flush()
@@ -913,6 +1256,7 @@ def main() -> None:
             print()
         csv_file.close()
         avg_missing_joints = (missing_joint_sum / total_frames) if total_frames > 0 else 0.0
+        avg_estimated_live_fps = (fps_sum / fps_count) if fps_count > 0 else live_source_fps
         summary_payload: dict[str, Any] = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "tracking_mode": args.tracking_mode,
@@ -951,7 +1295,17 @@ def main() -> None:
             "target_fps": TARGET_FPS,
             "target_sequence_length": TARGET_SEQUENCE_LENGTH,
             "live_source_fps": live_source_fps,
-            "live_source_window_frames": live_source_window_frames,
+            "auto_live_fps_enabled": args.auto_live_fps,
+            "estimated_live_fps_avg": avg_estimated_live_fps,
+            "estimated_live_fps_min": avg_estimated_live_fps if fps_min_seen is None else fps_min_seen,
+            "estimated_live_fps_max": avg_estimated_live_fps if fps_max_seen is None else fps_max_seen,
+            "live_source_window_frames": max_source_window_frames,
+            "require_motion_for_nonidle": bool(args.require_motion_for_nonidle),
+            "motion_threshold_on": float(args.motion_threshold_on),
+            "motion_threshold_off": float(args.motion_threshold_off),
+            "active_span_min_frames": int(args.active_span_min_frames),
+            "active_span_context_before_sec": float(args.active_span_context_before_sec),
+            "active_span_context_after_sec": float(args.active_span_context_after_sec),
         }
         summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 
@@ -967,6 +1321,13 @@ def main() -> None:
             "missing_joints: "
             f"avg={avg_missing_joints:.2f} min={summary_payload['missing_joints']['min']} "
             f"max={summary_payload['missing_joints']['max']}"
+        )
+        print(
+            "live_fps: "
+            f"auto={'ON' if args.auto_live_fps else 'OFF'} "
+            f"avg={avg_estimated_live_fps:.2f} "
+            f"min={summary_payload['estimated_live_fps_min']:.2f} "
+            f"max={summary_payload['estimated_live_fps_max']:.2f}"
         )
         if raw_class_counts:
             print(f"raw_counts: {dict(raw_class_counts)}")

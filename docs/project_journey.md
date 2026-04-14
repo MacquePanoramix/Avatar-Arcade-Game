@@ -997,3 +997,37 @@ So even though live had already moved to 24-frame model input, there was still a
 ### Current takeaway
 
 Before another architecture change, tighten live temporal alignment to observed runtime FPS and reevaluate with the existing 24-frame active-range-aware representation.
+
+## Live contiguous motion-active span alignment + dynamic runtime FPS estimation (inference-only upgrade)
+
+### What was observed
+
+- Offline performance became very strong after active-range-aware temporal resampling and the shorter 24-frame representation.
+- Live performance still lagged behind, with idle often dominating.
+- Real OpenPose live FPS was observed to fluctuate substantially depending on machine conditions.
+- A fixed live FPS assumption was therefore not robust enough.
+- We also realized that training did not simply keep arbitrary motion-positive frames; it used a contiguous active gesture span with context, then resampled that span.
+
+### What conclusion we drew
+
+- Live should not only estimate real FPS dynamically.
+- Live should also approximate training more faithfully by building classifier input from a recent contiguous motion-active span, not from a generic rolling window and not from scattered motion-positive frames.
+
+### What changed now
+
+- Dynamic live FPS estimation from incoming frame timing was added.
+- A live motion-energy signal was added.
+- Recent contiguous motion-active spans are now tracked.
+- When possible, live classifier input is built from that contiguous active span plus context, then resampled to 24 frames.
+- Motion remains a helper/gating signal, not a classifier output class.
+
+### Why it matters
+
+- This better approximates the active-span emphasis that training had.
+- It reduces idle contamination in live input windows.
+- It adapts better under fluctuating runtime FPS.
+- It is a more principled live-alignment improvement than adding another ad hoc label or changing architecture again.
+
+### Current takeaway
+
+- Before changing architecture again, make live temporal behavior mirror training’s contiguous active-span logic as closely as possible.
