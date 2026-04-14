@@ -160,6 +160,15 @@ def parse_args() -> argparse.Namespace:
             "or smoothed gate top1 confidence is below accept threshold."
         ),
     )
+    parser.add_argument(
+        "--live-source-fps",
+        type=float,
+        default=11.0,
+        help=(
+            "Observed live source FPS used to size the rolling source window before resampling "
+            "(default: 11.0)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -377,6 +386,8 @@ def main() -> None:
         raise ValueError("--trigger-cooldown-frames must be >= 0.")
     if args.release_idle_frames < 1:
         raise ValueError("--release-idle-frames must be >= 1.")
+    if args.live_source_fps <= 0:
+        raise ValueError("--live-source-fps must be > 0.")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -405,7 +416,12 @@ def main() -> None:
         tracking_mode=args.tracking_mode,
     )
 
-    live_source_window_frames = source_window_frames_for_target_span()
+    live_source_fps = float(args.live_source_fps)
+    live_source_window_frames = source_window_frames_for_target_span(
+        target_sequence_length=TARGET_SEQUENCE_LENGTH,
+        source_nominal_fps=live_source_fps,
+        target_fps=TARGET_FPS,
+    )
     rolling: deque[np.ndarray] = deque(maxlen=live_source_window_frames)
     ema_probs: np.ndarray | None = None
     seen_files: set[str] = set()
@@ -463,6 +479,8 @@ def main() -> None:
             "trigger_lock_was_off",
             "overlay_mode",
             "release_idle_frames",
+            "live_source_fps",
+            "live_source_window_frames",
         ],
     )
     writer.writeheader()
@@ -492,8 +510,11 @@ def main() -> None:
     print(f"Intended label: {intended_label or '(none)'}")
     print(
         "Temporal input policy: "
-        f"source_window={live_source_window_frames} frames (~{SOURCE_NOMINAL_FPS:.1f}fps source), "
-        f"resampled_to={TARGET_SEQUENCE_LENGTH} frames at {TARGET_FPS:.1f}fps target."
+        f"target_fps={TARGET_FPS:.1f}, "
+        f"live_source_fps={live_source_fps:.1f} "
+        f"(shared nominal default={SOURCE_NOMINAL_FPS:.1f}), "
+        f"source_window_frames={live_source_window_frames}, "
+        f"target_sequence_length={TARGET_SEQUENCE_LENGTH}."
     )
     print("Press Ctrl+C to stop.\n")
 
@@ -629,6 +650,8 @@ def main() -> None:
                             "trigger_lock_was_off": "",
                             "overlay_mode": effective_overlay_mode,
                             "release_idle_frames": args.release_idle_frames,
+                            "live_source_fps": live_source_fps,
+                            "live_source_window_frames": live_source_window_frames,
                         }
                     )
                     csv_file.flush()
@@ -876,6 +899,8 @@ def main() -> None:
                         "trigger_lock_was_off": trigger_lock_was_off,
                         "overlay_mode": effective_overlay_mode,
                         "release_idle_frames": args.release_idle_frames,
+                        "live_source_fps": live_source_fps,
+                        "live_source_window_frames": live_source_window_frames,
                     }
                 )
                 csv_file.flush()
@@ -923,6 +948,10 @@ def main() -> None:
             "trigger_cooldown_frames": args.trigger_cooldown_frames,
             "release_idle_frames": args.release_idle_frames,
             "trigger_lock_enabled": True,
+            "target_fps": TARGET_FPS,
+            "target_sequence_length": TARGET_SEQUENCE_LENGTH,
+            "live_source_fps": live_source_fps,
+            "live_source_window_frames": live_source_window_frames,
         }
         summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 

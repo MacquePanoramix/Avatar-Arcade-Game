@@ -959,3 +959,41 @@ In other words, we should not blindly feed the first full 90-frame take window w
 ### Current takeaway
 
 Before changing model architecture again, tighten temporal representation quality first: active-range-centered training windows plus shared short fixed-length resampling in both train and live.
+
+## Live temporal alignment fix for 24-frame active-range-aware pipeline (runtime source FPS correction)
+
+### What was observed after active-range-aware temporal resampling
+
+After moving to the shorter active-range-aware representation (`24 x 30` per sample), offline validation/test behavior improved substantially.
+This strongly indicated that the older 90-frame setup was overloading samples with idle/transition filler and hurting gesture signal quality.
+
+### What was observed in live despite that improvement
+
+Live behavior still lagged behind what the new offline metrics suggested.
+In real use, `idle` often remained dominant and intended gestures were harder than expected to push through the gate.
+So even though live had already moved to 24-frame model input, there was still a temporal mismatch somewhere in runtime construction.
+
+### What diagnosis was made
+
+- Live inference input shape had already been updated to the new 24-frame model contract.
+- However, live rolling source-window sizing was still tied to a nominal `15 fps` assumption.
+- On the target machine, observed OpenPose live throughput looked closer to ~`11 fps`.
+- Therefore live was collecting too much real-time context before resampling, likely mixing in extra idle and diluting short gestures.
+
+### What changed now
+
+- Live source FPS is now explicitly configurable in `live_openpose_debug` via `--live-source-fps`.
+- The default was shifted to `11.0` to better match observed runtime behavior.
+- Rolling source-window sizing now uses the runtime value:
+  - `source_window_frames = round(target_sequence_length * (live_source_fps / target_fps))`
+- The trained-model input contract is unchanged (`(1, 24, 30)` then flattened to `(1, 720)` for the MLP path).
+
+### Why it matters
+
+- Reduces idle dilution inside live rolling windows.
+- Improves temporal alignment with real runtime conditions without touching architecture.
+- Lower-risk than changing model shape again right after the recent representation improvement.
+
+### Current takeaway
+
+Before another architecture change, tighten live temporal alignment to observed runtime FPS and reevaluate with the existing 24-frame active-range-aware representation.
