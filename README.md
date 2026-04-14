@@ -136,6 +136,7 @@ python -m src.inference.live_openpose_debug \
   --json-dir data/raw/live_buffer/openpose_session/live_attack_earth_20260412_220500 \
   --model-path models/checkpoints/best_mlp.keras \
   --tracking-mode single_person \
+  --live-source-fps 11 \
   --accept-threshold 0.80 \
   --margin-threshold 0.20 \
   --print-every-n 10 \
@@ -203,6 +204,7 @@ Useful flags:
 - `--trigger-streak 3`
 - `--trigger-cooldown-frames 15`
 - `--release-idle-frames 3`
+- `--live-source-fps 11` (default `11.0`; set this to your observed OpenPose live FPS)
 - `--overlay-mode terminal|window|both|none` (default: `terminal`)
 - `--no-overlay` (equivalent to `--overlay-mode none`)
 
@@ -295,8 +297,10 @@ The command writes:
 - No future-frame interpolation/future-fill is used during dataset creation.
 - For non-idle gestures, dataset build reads `data/raw/openpose_json/active_gesture_ranges.csv` (or `--active-manifest-path`) and crops around `active_start_frame`/`active_end_frame` with context before resampling.
 - For idle gestures, dataset build uses deterministic full-span resampling (no active-range dependency).
-- Training and live inference now share one temporal policy (`src/preprocessing/temporal_resampling.py`): target FPS `10.0`, nominal source FPS `15.0`, fixed model length `24`.
+- Training and live inference share the same target representation (`24 x 30`) and target FPS (`10.0`) via `src/preprocessing/temporal_resampling.py`.
 - Live inference keeps a rolling recent source window, then resamples to the same 24-frame representation before model inference.
+- Live source FPS is now configurable with `--live-source-fps` (default `11.0`) so rolling window sizing can match observed OpenPose runtime throughput instead of always assuming nominal `15.0`.
+- This was added because OpenPose live behavior on the target machine has been observed closer to ~11 fps; oversized source windows can dilute short gestures with extra idle before resampling.
 - This reduces idle filler, reduces FPS mismatch impact, and lowers effective live delay while keeping fixed-length model input.
 
 ## Baseline training runs (LSTM + MLP)
