@@ -169,10 +169,24 @@ Decision logic is confidence-aware and intentionally conservative:
 If any condition fails, decision is `NO_ACTION`.
 This is by design for debugging/prototype deployment where underreaction is safer than overreaction.
 
+### Temporal TRIGGER/NO_TRIGGER layer (gameplay-style output)
+
+`ACCEPT` / `NO_ACTION` is a **frame-level confidence gate**.  
+`TRIGGER` / `NO_TRIGGER` is a **temporal action-output layer** on top of that gate for game-readiness.
+
+`live_openpose_debug` now supports:
+
+- `--trigger-streak` (default `3`): requires the same non-idle `ACCEPT` label across consecutive inference frames before firing a trigger.
+- `--trigger-cooldown-frames` (default `15`): after a trigger fires, suppresses additional triggers for M inference frames.
+
+This combination reduces overreaction from single-frame spikes while still preserving full per-frame debug visibility (`raw/smoothed/top-k`, `decision_status`) in terminal, CSV, and summary outputs.
+
 Useful flags:
 
 - `--accept-threshold 0.80`
 - `--margin-threshold 0.20`
+- `--trigger-streak 3`
+- `--trigger-cooldown-frames 15`
 - `--overlay-mode terminal|none` (default: `terminal`)
 - `--no-overlay` (equivalent to `--overlay-mode none`)
 

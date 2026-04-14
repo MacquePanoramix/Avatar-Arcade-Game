@@ -115,6 +115,18 @@ def parse_args() -> argparse.Namespace:
         help="Minimum (top1_prob - top2_prob) margin required to ACCEPT non-idle actions (default: 0.20).",
     )
     parser.add_argument(
+        "--trigger-streak",
+        type=int,
+        default=3,
+        help="Consecutive ACCEPT frames required to emit a TRIGGER action (default: 3).",
+    )
+    parser.add_argument(
+        "--trigger-cooldown-frames",
+        type=int,
+        default=15,
+        help="Inference-frame cooldown after each trigger where new triggers are suppressed (default: 15).",
+    )
+    parser.add_argument(
         "--overlay-mode",
         type=str,
         choices=["terminal", "none"],
@@ -198,6 +210,11 @@ def print_terminal_overlay(
     margin: float,
     decision_status: str,
     decision_label: str,
+    final_action_status: str,
+    final_action_label: str,
+    current_accept_streak: int,
+    trigger_streak_required: int,
+    current_cooldown_remaining: int,
     tracking_mode: str,
     selected_person_index: int | None,
     selected_left_person_index: int | None,
@@ -205,13 +222,16 @@ def print_terminal_overlay(
     intended_label: str,
 ) -> None:
     line = (
-        f"\rframe={frame_file} | fill={buffer_fill} | raw={raw_label} | smooth={smoothed_label} | "
+        f"frame={frame_file} | fill={buffer_fill} | raw={raw_label} | smooth={smoothed_label} | "
         f"top1={top1_label}({top1_prob:.2f}) | top2={top2_label}({top2_prob:.2f}) | margin={margin:.2f} | "
-        f"decision={decision_status}:{decision_label} | tracking={tracking_mode} "
+        f"decision={decision_status}:{decision_label} | "
+        f"trigger={final_action_status}:{final_action_label or '-'} "
+        f"(streak={current_accept_streak}/{trigger_streak_required}, cd={current_cooldown_remaining}) | "
+        f"tracking={tracking_mode} "
         f"sel={selected_person_index} L={selected_left_person_index} R={selected_right_person_index} "
         f"| intended={intended_label or '-'}"
     )
-    print(line + " " * 8, end="", flush=True)
+    print(line, flush=True)
 
 
 def main() -> None:
@@ -221,6 +241,10 @@ def main() -> None:
         raise ValueError("--accept-threshold must be in [0, 1].")
     if args.margin_threshold < 0 or args.margin_threshold > 1:
         raise ValueError("--margin-threshold must be in [0, 1].")
+    if args.trigger_streak < 1:
+        raise ValueError("--trigger-streak must be >= 1.")
+    if args.trigger_cooldown_frames < 0:
+        raise ValueError("--trigger-cooldown-frames must be >= 0.")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -288,6 +312,12 @@ def main() -> None:
             "decision_status",
             "accept_threshold",
             "margin_threshold",
+            "trigger_streak_required",
+            "current_accept_streak",
+            "trigger_cooldown_frames",
+            "current_cooldown_remaining",
+            "final_action_status",
+            "final_action_label",
         ],
     )
     writer.writeheader()
@@ -301,6 +331,10 @@ def main() -> None:
     print(f"Tracking mode: {args.tracking_mode}")
     print(f"Overlay mode: {overlay_mode}")
     print(f"Decision thresholds: accept>={args.accept_threshold:.2f}, margin>={args.margin_threshold:.2f}")
+    print(
+        "Trigger filtering: "
+        f"streak>={args.trigger_streak} non-idle ACCEPT frames, cooldown={args.trigger_cooldown_frames} frames"
+    )
     print(f"Intended label: {intended_label or '(none)'}")
     print("Press Ctrl+C to stop.\n")
 
@@ -318,6 +352,13 @@ def main() -> None:
     raw_smoothed_disagreements: Counter[str] = Counter()
     decision_status_counts: Counter[str] = Counter()
     decision_label_counts: Counter[str] = Counter()
+    final_action_status_counts: Counter[str] = Counter()
+    final_action_label_counts: Counter[str] = Counter()
+    trigger_counts_by_label: Counter[str] = Counter()
+    total_triggers = 0
+    current_accept_streak = 0
+    current_accept_label = ""
+    current_cooldown_remaining = 0
 
     idle_polls = 0
     try:
@@ -408,6 +449,12 @@ def main() -> None:
                             "decision_status": "",
                             "accept_threshold": args.accept_threshold,
                             "margin_threshold": args.margin_threshold,
+                            "trigger_streak_required": args.trigger_streak,
+                            "current_accept_streak": 0,
+                            "trigger_cooldown_frames": args.trigger_cooldown_frames,
+                            "current_cooldown_remaining": 0,
+                            "final_action_status": "",
+                            "final_action_label": "",
                         }
                     )
                     csv_file.flush()
@@ -453,6 +500,35 @@ def main() -> None:
                 )
                 decision_status_counts[decision_status] += 1
                 decision_label_counts[decision_label] += 1
+                is_valid_accept = (
+                    decision_status == "ACCEPT"
+                    and decision_label not in {"", "idle", "NO_ACTION"}
+                )
+                if is_valid_accept:
+                    if decision_label == current_accept_label:
+                        current_accept_streak += 1
+                    else:
+                        current_accept_label = decision_label
+                        current_accept_streak = 1
+                else:
+                    current_accept_label = ""
+                    current_accept_streak = 0
+
+                final_action_status = "NO_TRIGGER"
+                final_action_label = ""
+                if current_cooldown_remaining > 0:
+                    current_cooldown_remaining -= 1
+                elif current_accept_streak >= args.trigger_streak:
+                    final_action_status = "TRIGGER"
+                    final_action_label = current_accept_label
+                    total_triggers += 1
+                    trigger_counts_by_label[final_action_label] += 1
+                    current_cooldown_remaining = args.trigger_cooldown_frames
+                    current_accept_streak = 0
+                    current_accept_label = ""
+
+                final_action_status_counts[final_action_status] += 1
+                final_action_label_counts[final_action_label or "NO_ACTION"] += 1
 
                 if overlay_mode == "terminal":
                     print_terminal_overlay(
@@ -467,6 +543,11 @@ def main() -> None:
                         margin=top1_margin,
                         decision_status=decision_status,
                         decision_label=decision_label,
+                        final_action_status=final_action_status,
+                        final_action_label=final_action_label,
+                        current_accept_streak=current_accept_streak,
+                        trigger_streak_required=args.trigger_streak,
+                        current_cooldown_remaining=current_cooldown_remaining,
                         tracking_mode=frame_result.tracking_mode,
                         selected_person_index=frame_result.selected_person_index,
                         selected_left_person_index=frame_result.selected_left_person_index,
@@ -475,8 +556,6 @@ def main() -> None:
                     )
 
                 if inference_frames % print_every_n == 0:
-                    if overlay_mode == "terminal":
-                        print()
                     severity = "!!" if frame_result.used_prev_frame_copy or frame_result.suspicious_jump else "--"
                     print(
                         f"{severity} frame={frame_path.name} | raw={raw_label} | smooth={smoothed_label} "
@@ -485,6 +564,9 @@ def main() -> None:
                         f"top2={top2_label}:{top2_prob:.3f} "
                         f"margin={top1_margin:.3f} "
                         f"decision={decision_status}:{decision_label} "
+                        f"trigger={final_action_status}:{final_action_label or '-'} "
+                        f"streak={current_accept_streak}/{args.trigger_streak} "
+                        f"cooldown={current_cooldown_remaining} "
                         f"| people={frame_result.detected_people_count} "
                         f"sel={frame_result.selected_person_index} "
                         f"L={frame_result.selected_left_person_index} "
@@ -529,6 +611,12 @@ def main() -> None:
                         "decision_status": decision_status,
                         "accept_threshold": args.accept_threshold,
                         "margin_threshold": args.margin_threshold,
+                        "trigger_streak_required": args.trigger_streak,
+                        "current_accept_streak": current_accept_streak,
+                        "trigger_cooldown_frames": args.trigger_cooldown_frames,
+                        "current_cooldown_remaining": current_cooldown_remaining,
+                        "final_action_status": final_action_status,
+                        "final_action_label": final_action_label,
                     }
                 )
                 csv_file.flush()
@@ -559,8 +647,14 @@ def main() -> None:
             "raw_to_smoothed_disagreements_top10": dict(raw_smoothed_disagreements.most_common(10)),
             "decision_status_counts": dict(decision_status_counts),
             "decision_label_counts": dict(decision_label_counts),
+            "final_action_status_counts": dict(final_action_status_counts),
+            "final_action_label_counts": dict(final_action_label_counts),
+            "total_triggers": total_triggers,
+            "trigger_counts_by_label": dict(trigger_counts_by_label),
             "accept_threshold": args.accept_threshold,
             "margin_threshold": args.margin_threshold,
+            "trigger_streak_required": args.trigger_streak,
+            "trigger_cooldown_frames": args.trigger_cooldown_frames,
         }
         summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 

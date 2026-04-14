@@ -604,3 +604,47 @@ Current takeaway:
 
 - This stage gives a deployment-prototype answer to the three critical live questions: what the model thinks now, how sure it is, and whether we trust it enough to act.
 - The conservative accept/abstain policy is intentional because overreaction is more dangerous than underreaction in this game, and game-level cooldown/behavior logic can remain a later integration layer.
+
+## Temporal trigger filtering layer: bridging frame decisions to gameplay actions
+
+### Problem observed in recent live tests
+
+The ACCEPT/NO_ACTION gate improved safety versus raw labels, but live behavior still showed a practical gameplay mismatch:
+single-frame ACCEPT spikes can appear during noisy transitions, especially when gestures are changing or near class boundaries.
+
+That means frame-level confidence gating alone is informative, but still too reactive for immediate action firing.
+
+### Why frame-level ACCEPT is not enough
+
+- `ACCEPT` answers: "Is this frame confident enough right now?"
+- Gameplay needs: "Has this action stayed stable long enough to be intentional, and should we fire now?"
+
+Without temporal filtering, one high-confidence frame can trigger too early.
+Without suppression after firing, repeated near-identical frames can over-fire.
+
+### What was changed
+
+An additive temporal trigger layer was added on top of existing decision outputs in `live_openpose_debug`:
+
+- New CLI flag: `--trigger-streak` (default `3`)
+  - requires the same non-idle `ACCEPT` decision label for N consecutive inference frames before firing.
+- New CLI flag: `--trigger-cooldown-frames` (default `15`)
+  - after a trigger fires, suppresses new triggers for M inference frames.
+- New final output state fields:
+  - `final_action_status`: `TRIGGER` or `NO_TRIGGER`
+  - `final_action_label`: triggered label or empty
+- Streak reset behavior:
+  - reset on `NO_ACTION`,
+  - reset when decision label changes,
+  - reset on idle/empty/no-action labels.
+- Extended CSV and summary outputs with trigger-state and trigger-count metrics.
+- Improved terminal overlay readability so each update prints cleanly as its own line (safer for PowerShell viewing).
+
+### Expected benefit for game integration
+
+This preserves full debug visibility while making output behavior much closer to game-ready action semantics:
+
+- fewer false-positive action bursts from single-frame spikes,
+- better intentionality via short temporal confirmation,
+- reduced repeated-fire spam via cooldown latch,
+- cleaner handoff path from debug inference logs to eventual Unity gameplay trigger integration.
