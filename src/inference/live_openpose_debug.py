@@ -24,6 +24,11 @@ from src.preprocessing.build_openpose_dataset import FEATURES_PER_FRAME, SEQUENC
 from src.preprocessing.runtime_preprocess import RuntimePreprocessor
 from src.utils.paths import load_paths_config, resolve_path
 
+try:
+    import cv2
+except ImportError:  # pragma: no cover - optional dependency
+    cv2 = None
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Live OpenPose JSON debug classifier (pose-only MLP).")
@@ -129,14 +134,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--overlay-mode",
         type=str,
-        choices=["terminal", "none"],
+        choices=["terminal", "window", "both", "none"],
         default="terminal",
-        help="Live overlay mode (default: terminal). Use 'none' to disable overlay HUD.",
+        help="Live overlay mode (default: terminal).",
     )
     parser.add_argument(
         "--no-overlay",
         action="store_true",
         help="Disable live overlay HUD (equivalent to --overlay-mode none).",
+    )
+    parser.add_argument(
+        "--release-idle-frames",
+        type=int,
+        default=3,
+        help=(
+            "Unlock trigger hold protection after this many consecutive release frames. "
+            "A release frame is any frame where decision=NO_ACTION, raw/smoothed label is idle, "
+            "or top1 confidence is below accept threshold."
+        ),
     )
     return parser.parse_args()
 
@@ -215,6 +230,10 @@ def print_terminal_overlay(
     current_accept_streak: int,
     trigger_streak_required: int,
     current_cooldown_remaining: int,
+    trigger_locked: bool,
+    release_counter: int,
+    release_idle_frames: int,
+    detected_people_count: int,
     tracking_mode: str,
     selected_person_index: int | None,
     selected_left_person_index: int | None,
@@ -227,11 +246,111 @@ def print_terminal_overlay(
         f"decision={decision_status}:{decision_label} | "
         f"trigger={final_action_status}:{final_action_label or '-'} "
         f"(streak={current_accept_streak}/{trigger_streak_required}, cd={current_cooldown_remaining}) | "
+        f"lock={'Y' if trigger_locked else 'N'} release={release_counter}/{release_idle_frames} | "
         f"tracking={tracking_mode} "
-        f"sel={selected_person_index} L={selected_left_person_index} R={selected_right_person_index} "
+        f"people={detected_people_count} sel={selected_person_index} "
+        f"L={selected_left_person_index} R={selected_right_person_index} "
         f"| intended={intended_label or '-'}"
     )
     print(line, flush=True)
+
+
+def draw_window_overlay(
+    *,
+    frame_file: str,
+    final_action_status: str,
+    final_action_label: str,
+    decision_status: str,
+    decision_label: str,
+    raw_label: str,
+    smoothed_label: str,
+    top1_label: str,
+    top1_prob: float,
+    top2_label: str,
+    top2_prob: float,
+    margin: float,
+    current_accept_streak: int,
+    trigger_streak_required: int,
+    current_cooldown_remaining: int,
+    trigger_locked: bool,
+    release_counter: int,
+    release_idle_frames: int,
+    detected_people_count: int,
+    selected_person_index: int | None,
+    selected_left_person_index: int | None,
+    selected_right_person_index: int | None,
+    intended_label: str,
+    severe_fallback: bool,
+) -> None:
+    if cv2 is None:
+        return
+    canvas = np.full((900, 1500, 3), 24, dtype=np.uint8)
+    white = (235, 235, 235)
+    gray = (170, 170, 170)
+    red = (40, 40, 220)
+    orange = (0, 180, 240)
+    green = (60, 220, 60)
+    final_color = green if final_action_status == "TRIGGER" else (orange if decision_status == "ACCEPT" else white)
+    accent_color = red if severe_fallback else gray
+    final_text = final_action_label if final_action_status == "TRIGGER" else "NO ACTION"
+
+    cv2.putText(canvas, "FINAL ACTION", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.2, gray, 2, cv2.LINE_AA)
+    cv2.putText(canvas, final_text, (40, 190), cv2.FONT_HERSHEY_DUPLEX, 2.6, final_color, 5, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"{final_action_status} | decision={decision_status}:{decision_label}",
+        (40, 250),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        final_color,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(canvas, f"raw={raw_label}   smooth={smoothed_label}", (40, 330), cv2.FONT_HERSHEY_SIMPLEX, 1.0, white, 2, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"top1={top1_label} ({top1_prob:.2f})   top2={top2_label} ({top2_prob:.2f})   margin={margin:.2f}",
+        (40, 390),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.95,
+        white,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"streak={current_accept_streak}/{trigger_streak_required}   cooldown={current_cooldown_remaining}",
+        (40, 450),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.95,
+        white,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"trigger_lock={'ON' if trigger_locked else 'OFF'}   release_counter={release_counter}/{release_idle_frames}",
+        (40, 510),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.95,
+        accent_color,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"people={detected_people_count}   selected={selected_person_index}   L={selected_left_person_index} R={selected_right_person_index}",
+        (40, 570),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        white,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(canvas, f"intended={intended_label or '-'}", (40, 630), cv2.FONT_HERSHEY_SIMPLEX, 0.95, white, 2, cv2.LINE_AA)
+    cv2.putText(canvas, f"frame: {frame_file}", (40, 860), cv2.FONT_HERSHEY_SIMPLEX, 0.65, gray, 1, cv2.LINE_AA)
+    cv2.imshow("Live Gesture HUD", canvas)
+    cv2.waitKey(1)
 
 
 def main() -> None:
@@ -245,6 +364,8 @@ def main() -> None:
         raise ValueError("--trigger-streak must be >= 1.")
     if args.trigger_cooldown_frames < 0:
         raise ValueError("--trigger-cooldown-frames must be >= 0.")
+    if args.release_idle_frames < 1:
+        raise ValueError("--release-idle-frames must be >= 1.")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -318,6 +439,12 @@ def main() -> None:
             "current_cooldown_remaining",
             "final_action_status",
             "final_action_label",
+            "trigger_locked",
+            "release_counter",
+            "reset_counter",
+            "trigger_lock_was_off",
+            "overlay_mode",
+            "release_idle_frames",
         ],
     )
     writer.writeheader()
@@ -329,11 +456,20 @@ def main() -> None:
     print(f"CSV log: {log_csv_path}")
     print(f"Summary: {summary_path}")
     print(f"Tracking mode: {args.tracking_mode}")
-    print(f"Overlay mode: {overlay_mode}")
+    effective_overlay_mode = overlay_mode
+    if overlay_mode in {"window", "both"} and cv2 is None:
+        print("WARNING: OpenCV (cv2) not found; window HUD disabled.")
+        effective_overlay_mode = "terminal" if overlay_mode == "both" else "none"
+    print(f"Overlay mode: {effective_overlay_mode} (requested: {overlay_mode})")
     print(f"Decision thresholds: accept>={args.accept_threshold:.2f}, margin>={args.margin_threshold:.2f}")
     print(
         "Trigger filtering: "
         f"streak>={args.trigger_streak} non-idle ACCEPT frames, cooldown={args.trigger_cooldown_frames} frames"
+    )
+    print(
+        "Trigger hold lock release: "
+        f"{args.release_idle_frames} consecutive release frames "
+        "(NO_ACTION or idle raw/smoothed or confidence below threshold)"
     )
     print(f"Intended label: {intended_label or '(none)'}")
     print("Press Ctrl+C to stop.\n")
@@ -356,9 +492,12 @@ def main() -> None:
     final_action_label_counts: Counter[str] = Counter()
     trigger_counts_by_label: Counter[str] = Counter()
     total_triggers = 0
+    trigger_lock_was_off_count = 0
     current_accept_streak = 0
     current_accept_label = ""
     current_cooldown_remaining = 0
+    trigger_locked = False
+    release_counter = 0
 
     idle_polls = 0
     try:
@@ -455,6 +594,12 @@ def main() -> None:
                             "current_cooldown_remaining": 0,
                             "final_action_status": "",
                             "final_action_label": "",
+                            "trigger_locked": 0,
+                            "release_counter": 0,
+                            "reset_counter": 0,
+                            "trigger_lock_was_off": "",
+                            "overlay_mode": effective_overlay_mode,
+                            "release_idle_frames": args.release_idle_frames,
                         }
                     )
                     csv_file.flush()
@@ -504,6 +649,24 @@ def main() -> None:
                     decision_status == "ACCEPT"
                     and decision_label not in {"", "idle", "NO_ACTION"}
                 )
+                release_frame = (
+                    decision_status == "NO_ACTION"
+                    or raw_label == "idle"
+                    or smoothed_label == "idle"
+                    or top1_prob < args.accept_threshold
+                )
+                if trigger_locked:
+                    if release_frame:
+                        release_counter += 1
+                    else:
+                        release_counter = 0
+                    if release_counter >= args.release_idle_frames:
+                        trigger_locked = False
+                        release_counter = 0
+                        current_accept_streak = 0
+                        current_accept_label = ""
+                else:
+                    release_counter = 0
                 if is_valid_accept:
                     if decision_label == current_accept_label:
                         current_accept_streak += 1
@@ -516,21 +679,27 @@ def main() -> None:
 
                 final_action_status = "NO_TRIGGER"
                 final_action_label = ""
+                trigger_lock_was_off = ""
                 if current_cooldown_remaining > 0:
                     current_cooldown_remaining -= 1
-                elif current_accept_streak >= args.trigger_streak:
+                elif (not trigger_locked) and current_accept_streak >= args.trigger_streak:
                     final_action_status = "TRIGGER"
                     final_action_label = current_accept_label
                     total_triggers += 1
+                    trigger_lock_was_off = 1
+                    trigger_lock_was_off_count += 1
                     trigger_counts_by_label[final_action_label] += 1
                     current_cooldown_remaining = args.trigger_cooldown_frames
                     current_accept_streak = 0
                     current_accept_label = ""
+                    trigger_locked = True
+                    release_counter = 0
 
                 final_action_status_counts[final_action_status] += 1
                 final_action_label_counts[final_action_label or "NO_ACTION"] += 1
 
-                if overlay_mode == "terminal":
+                severe_fallback = bool(frame_result.used_prev_frame_copy or frame_result.suspicious_jump)
+                if effective_overlay_mode in {"terminal", "both"}:
                     print_terminal_overlay(
                         frame_file=frame_path.name,
                         buffer_fill=f"{fill}/{SEQUENCE_LENGTH}",
@@ -548,11 +717,42 @@ def main() -> None:
                         current_accept_streak=current_accept_streak,
                         trigger_streak_required=args.trigger_streak,
                         current_cooldown_remaining=current_cooldown_remaining,
+                        trigger_locked=trigger_locked,
+                        release_counter=release_counter,
+                        release_idle_frames=args.release_idle_frames,
+                        detected_people_count=frame_result.detected_people_count,
                         tracking_mode=frame_result.tracking_mode,
                         selected_person_index=frame_result.selected_person_index,
                         selected_left_person_index=frame_result.selected_left_person_index,
                         selected_right_person_index=frame_result.selected_right_person_index,
                         intended_label=intended_label,
+                    )
+                if effective_overlay_mode in {"window", "both"}:
+                    draw_window_overlay(
+                        frame_file=frame_path.name,
+                        final_action_status=final_action_status,
+                        final_action_label=final_action_label,
+                        decision_status=decision_status,
+                        decision_label=decision_label,
+                        raw_label=raw_label,
+                        smoothed_label=smoothed_label,
+                        top1_label=top1_label,
+                        top1_prob=top1_prob,
+                        top2_label=top2_label,
+                        top2_prob=top2_prob,
+                        margin=top1_margin,
+                        current_accept_streak=current_accept_streak,
+                        trigger_streak_required=args.trigger_streak,
+                        current_cooldown_remaining=current_cooldown_remaining,
+                        trigger_locked=trigger_locked,
+                        release_counter=release_counter,
+                        release_idle_frames=args.release_idle_frames,
+                        detected_people_count=frame_result.detected_people_count,
+                        selected_person_index=frame_result.selected_person_index,
+                        selected_left_person_index=frame_result.selected_left_person_index,
+                        selected_right_person_index=frame_result.selected_right_person_index,
+                        intended_label=intended_label,
+                        severe_fallback=severe_fallback,
                     )
 
                 if inference_frames % print_every_n == 0:
@@ -567,6 +767,8 @@ def main() -> None:
                         f"trigger={final_action_status}:{final_action_label or '-'} "
                         f"streak={current_accept_streak}/{args.trigger_streak} "
                         f"cooldown={current_cooldown_remaining} "
+                        f"lock={'Y' if trigger_locked else 'N'} "
+                        f"release={release_counter}/{args.release_idle_frames} "
                         f"| people={frame_result.detected_people_count} "
                         f"sel={frame_result.selected_person_index} "
                         f"L={frame_result.selected_left_person_index} "
@@ -617,13 +819,21 @@ def main() -> None:
                         "current_cooldown_remaining": current_cooldown_remaining,
                         "final_action_status": final_action_status,
                         "final_action_label": final_action_label,
+                        "trigger_locked": int(trigger_locked),
+                        "release_counter": release_counter,
+                        "reset_counter": release_counter,
+                        "trigger_lock_was_off": trigger_lock_was_off,
+                        "overlay_mode": effective_overlay_mode,
+                        "release_idle_frames": args.release_idle_frames,
                     }
                 )
                 csv_file.flush()
     except KeyboardInterrupt:
         print("\nStopped by user.")
     finally:
-        if overlay_mode == "terminal":
+        if cv2 is not None and effective_overlay_mode in {"window", "both"}:
+            cv2.destroyAllWindows()
+        if effective_overlay_mode in {"terminal", "both"}:
             print()
         csv_file.close()
         avg_missing_joints = (missing_joint_sum / total_frames) if total_frames > 0 else 0.0
@@ -651,10 +861,17 @@ def main() -> None:
             "final_action_label_counts": dict(final_action_label_counts),
             "total_triggers": total_triggers,
             "trigger_counts_by_label": dict(trigger_counts_by_label),
+            "trigger_lock_was_off_count": trigger_lock_was_off_count,
+            "overlay_mode": effective_overlay_mode,
+            "trigger_locked_final": trigger_locked,
+            "release_counter_final": release_counter,
+            "reset_counter_final": release_counter,
             "accept_threshold": args.accept_threshold,
             "margin_threshold": args.margin_threshold,
             "trigger_streak_required": args.trigger_streak,
             "trigger_cooldown_frames": args.trigger_cooldown_frames,
+            "release_idle_frames": args.release_idle_frames,
+            "trigger_lock_enabled": True,
         }
         summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 

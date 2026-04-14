@@ -149,16 +149,21 @@ python -m src.inference.live_openpose_debug \
 
 ### Live overlay + ACCEPT/NO_ACTION decision (debug stage)
 
-`live_openpose_debug` now includes a lightweight live terminal overlay for real-time debugging before gameplay integration.
+`live_openpose_debug` now supports both terminal output and a large OpenCV HUD window for real-time debugging before gameplay integration.
 
 Per inference frame, the overlay shows:
 
+- final action (largest field): triggered label or `NO ACTION`
 - raw label
 - smoothed label
 - top-1 label/confidence
 - top-2 label/confidence
 - top1-top2 margin
 - decision status (`ACCEPT` or `NO_ACTION`)
+- trigger streak / cooldown / trigger-lock release state
+- people detected + selected person index (plus left/right mapping when available)
+- intended label (if set)
+- latest frame filename
 
 Decision logic is confidence-aware and intentionally conservative:
 
@@ -178,6 +183,16 @@ This is by design for debugging/prototype deployment where underreaction is safe
 
 - `--trigger-streak` (default `3`): requires the same non-idle `ACCEPT` label across consecutive inference frames before firing a trigger.
 - `--trigger-cooldown-frames` (default `15`): after a trigger fires, suppresses additional triggers for M inference frames.
+- `--release-idle-frames` (default `3`): enables "one hold = one trigger" lock behavior. After a trigger, lock stays ON until this many consecutive release frames occur.
+
+Release frame rule (for lock reset):
+- decision becomes `NO_ACTION`, **or**
+- raw/smoothed label is `idle`, **or**
+- top-1 confidence drops below `--accept-threshold`.
+
+Interpretation:
+- `ACCEPT` = frame-level confidence gate.
+- `TRIGGER` = gameplay output after streak/cooldown/lock rules.
 
 This combination reduces overreaction from single-frame spikes while still preserving full per-frame debug visibility (`raw/smoothed/top-k`, `decision_status`) in terminal, CSV, and summary outputs.
 
@@ -187,8 +202,24 @@ Useful flags:
 - `--margin-threshold 0.20`
 - `--trigger-streak 3`
 - `--trigger-cooldown-frames 15`
-- `--overlay-mode terminal|none` (default: `terminal`)
+- `--release-idle-frames 3`
+- `--overlay-mode terminal|window|both|none` (default: `terminal`)
 - `--no-overlay` (equivalent to `--overlay-mode none`)
+
+Window HUD example:
+
+```bash
+python -m src.inference.live_openpose_debug \
+  --json-dir data/raw/live_buffer/openpose_session/live_attack_earth_20260412_220500 \
+  --model-path models/checkpoints/best_mlp.keras \
+  --tracking-mode single_person \
+  --overlay-mode window \
+  --accept-threshold 0.80 \
+  --margin-threshold 0.20 \
+  --trigger-streak 3 \
+  --trigger-cooldown-frames 15 \
+  --release-idle-frames 3
+```
 
 Confidence summary command:
 

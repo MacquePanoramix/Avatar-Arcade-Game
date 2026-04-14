@@ -648,3 +648,51 @@ This preserves full debug visibility while making output behavior much closer to
 - better intentionality via short temporal confirmation,
 - reduced repeated-fire spam via cooldown latch,
 - cleaner handoff path from debug inference logs to eventual Unity gameplay trigger integration.
+
+## Visual HUD + hold-lock release upgrade for live gesture experiments
+
+### Problem observed
+
+- Terminal-only monitoring was hard to read while physically performing gestures at distance.
+- Cooldown-only trigger suppression still allowed repeated re-fire when a gesture was continuously held long enough.
+
+### Why terminal-only was not enough
+
+- During movement tests, attention needs to stay on body pose and camera framing, not dense console text.
+- A larger visual hierarchy (large final-action text + color coding) is much easier for rapid trial-and-error during live experiments.
+
+### Why repeated triggers while holding were undesirable
+
+- For gameplay-like semantics, one continuous hold should map to one action fire.
+- Re-triggering without a deliberate release creates action spam and confounds gesture quality evaluation prior to Unity integration.
+
+### What changed
+
+- Added configurable overlay modes: `terminal`, `window`, `both`, or `none`.
+- Added a large OpenCV HUD window that displays:
+  - `FINAL ACTION` (largest, trigger label or `NO ACTION`)
+  - decision state (`ACCEPT` / `NO_ACTION`)
+  - raw/smoothed labels, top1/top2 confidence, margin
+  - trigger streak + cooldown
+  - trigger lock + release counter
+  - detected people + selected index + left/right mapping
+  - intended label + latest frame file
+- Added trigger lock behavior:
+  - lock turns ON when trigger fires,
+  - new triggers blocked while lock ON,
+  - lock releases only after `--release-idle-frames` consecutive release frames.
+- Release frame rule used:
+  - decision is `NO_ACTION`, or raw/smoothed is `idle`, or top1 confidence falls below accept threshold.
+- Extended CSV/summary outputs with:
+  - `final_action_status`/`final_action_label` (kept)
+  - `trigger_locked`
+  - `release_counter` and `reset_counter`
+  - `trigger_lock_was_off`
+  - `overlay_mode` and `release_idle_frames`
+  - trigger counts by label and lock-off trigger count.
+
+### Expected benefit before Unity integration
+
+- Faster, clearer live iteration in local Windows testing.
+- More game-realistic action semantics (`one hold = one trigger`) with explicit release/reset behavior.
+- Better diagnostics in CSV/summary for tuning thresholds and validating lock behavior before gameplay bridge work.
