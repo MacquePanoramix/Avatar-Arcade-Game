@@ -136,6 +136,8 @@ python -m src.inference.live_openpose_debug \
   --json-dir data/raw/live_buffer/openpose_session/live_attack_earth_20260412_220500 \
   --model-path models/checkpoints/best_mlp.keras \
   --tracking-mode single_person \
+  --accept-threshold 0.80 \
+  --margin-threshold 0.20 \
   --print-every-n 10 \
   --quiet-warmup \
   --max-idle-polls 40 \
@@ -144,6 +146,35 @@ python -m src.inference.live_openpose_debug \
 
 - `--intended-label` is optional.
 - If provided, the value is written to every CSV row as `intended_label`.
+
+### Live overlay + ACCEPT/NO_ACTION decision (debug stage)
+
+`live_openpose_debug` now includes a lightweight live terminal overlay for real-time debugging before gameplay integration.
+
+Per inference frame, the overlay shows:
+
+- raw label
+- smoothed label
+- top-1 label/confidence
+- top-2 label/confidence
+- top1-top2 margin
+- decision status (`ACCEPT` or `NO_ACTION`)
+
+Decision logic is confidence-aware and intentionally conservative:
+
+- top-1 label must be **non-idle**
+- top-1 confidence must be at least `--accept-threshold` (default `0.80`)
+- `(top1 - top2)` must be at least `--margin-threshold` (default `0.20`)
+
+If any condition fails, decision is `NO_ACTION`.
+This is by design for debugging/prototype deployment where underreaction is safer than overreaction.
+
+Useful flags:
+
+- `--accept-threshold 0.80`
+- `--margin-threshold 0.20`
+- `--overlay-mode terminal|none` (default: `terminal`)
+- `--no-overlay` (equivalent to `--overlay-mode none`)
 
 Confidence summary command:
 

@@ -102,6 +102,30 @@ def parse_args() -> argparse.Namespace:
             "Written into every CSV row for downstream confidence analysis."
         ),
     )
+    parser.add_argument(
+        "--accept-threshold",
+        type=float,
+        default=0.80,
+        help="Minimum top-1 confidence required to ACCEPT non-idle actions (default: 0.80).",
+    )
+    parser.add_argument(
+        "--margin-threshold",
+        type=float,
+        default=0.20,
+        help="Minimum (top1_prob - top2_prob) margin required to ACCEPT non-idle actions (default: 0.20).",
+    )
+    parser.add_argument(
+        "--overlay-mode",
+        type=str,
+        choices=["terminal", "none"],
+        default="terminal",
+        help="Live overlay mode (default: terminal). Use 'none' to disable overlay HUD.",
+    )
+    parser.add_argument(
+        "--no-overlay",
+        action="store_true",
+        help="Disable live overlay HUD (equivalent to --overlay-mode none).",
+    )
     return parser.parse_args()
 
 
@@ -138,8 +162,65 @@ def compact_top3(probs: np.ndarray, id_to_label: dict[int, str], top_k: int = 3)
     )
 
 
+def normalize_overlay_mode(args: argparse.Namespace) -> str:
+    if args.no_overlay:
+        return "none"
+    return str(args.overlay_mode)
+
+
+def decide_action(
+    *,
+    top1_label: str,
+    top1_prob: float,
+    top2_prob: float,
+    accept_threshold: float,
+    margin_threshold: float,
+) -> tuple[str, str, float]:
+    margin = float(top1_prob - top2_prob)
+    is_non_idle = top1_label != "idle"
+    meets_conf = top1_prob >= accept_threshold
+    meets_margin = margin >= margin_threshold
+    if is_non_idle and meets_conf and meets_margin:
+        return top1_label, "ACCEPT", margin
+    return "NO_ACTION", "NO_ACTION", margin
+
+
+def print_terminal_overlay(
+    *,
+    frame_file: str,
+    buffer_fill: str,
+    raw_label: str,
+    smoothed_label: str,
+    top1_label: str,
+    top1_prob: float,
+    top2_label: str,
+    top2_prob: float,
+    margin: float,
+    decision_status: str,
+    decision_label: str,
+    tracking_mode: str,
+    selected_person_index: int | None,
+    selected_left_person_index: int | None,
+    selected_right_person_index: int | None,
+    intended_label: str,
+) -> None:
+    line = (
+        f"\rframe={frame_file} | fill={buffer_fill} | raw={raw_label} | smooth={smoothed_label} | "
+        f"top1={top1_label}({top1_prob:.2f}) | top2={top2_label}({top2_prob:.2f}) | margin={margin:.2f} | "
+        f"decision={decision_status}:{decision_label} | tracking={tracking_mode} "
+        f"sel={selected_person_index} L={selected_left_person_index} R={selected_right_person_index} "
+        f"| intended={intended_label or '-'}"
+    )
+    print(line + " " * 8, end="", flush=True)
+
+
 def main() -> None:
     args = parse_args()
+    overlay_mode = normalize_overlay_mode(args)
+    if args.accept_threshold < 0 or args.accept_threshold > 1:
+        raise ValueError("--accept-threshold must be in [0, 1].")
+    if args.margin_threshold < 0 or args.margin_threshold > 1:
+        raise ValueError("--margin-threshold must be in [0, 1].")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -202,6 +283,11 @@ def main() -> None:
             "selected_right_person_index",
             "tracking_note",
             "intended_label",
+            "top1_margin",
+            "decision_label",
+            "decision_status",
+            "accept_threshold",
+            "margin_threshold",
         ],
     )
     writer.writeheader()
@@ -213,6 +299,8 @@ def main() -> None:
     print(f"CSV log: {log_csv_path}")
     print(f"Summary: {summary_path}")
     print(f"Tracking mode: {args.tracking_mode}")
+    print(f"Overlay mode: {overlay_mode}")
+    print(f"Decision thresholds: accept>={args.accept_threshold:.2f}, margin>={args.margin_threshold:.2f}")
     print(f"Intended label: {intended_label or '(none)'}")
     print("Press Ctrl+C to stop.\n")
 
@@ -228,6 +316,8 @@ def main() -> None:
     raw_class_counts: Counter[str] = Counter()
     smoothed_class_counts: Counter[str] = Counter()
     raw_smoothed_disagreements: Counter[str] = Counter()
+    decision_status_counts: Counter[str] = Counter()
+    decision_label_counts: Counter[str] = Counter()
 
     idle_polls = 0
     try:
@@ -313,6 +403,11 @@ def main() -> None:
                             "selected_right_person_index": frame_result.selected_right_person_index,
                             "tracking_note": frame_result.tracking_note,
                             "intended_label": intended_label,
+                            "top1_margin": "",
+                            "decision_label": "",
+                            "decision_status": "",
+                            "accept_threshold": args.accept_threshold,
+                            "margin_threshold": args.margin_threshold,
                         }
                     )
                     csv_file.flush()
@@ -342,11 +437,54 @@ def main() -> None:
                 if raw_label != smoothed_label:
                     raw_smoothed_disagreements[f"{raw_label} -> {smoothed_label}"] += 1
 
+                top3 = np.argsort(raw_probs)[-3:][::-1]
+                top1_idx = int(top3[0])
+                top2_idx = int(top3[1])
+                top1_label = id_to_label.get(top1_idx, f"class_{top1_idx}")
+                top2_label = id_to_label.get(top2_idx, f"class_{top2_idx}")
+                top1_prob = float(raw_probs[top1_idx])
+                top2_prob = float(raw_probs[top2_idx])
+                decision_label, decision_status, top1_margin = decide_action(
+                    top1_label=top1_label,
+                    top1_prob=top1_prob,
+                    top2_prob=top2_prob,
+                    accept_threshold=float(args.accept_threshold),
+                    margin_threshold=float(args.margin_threshold),
+                )
+                decision_status_counts[decision_status] += 1
+                decision_label_counts[decision_label] += 1
+
+                if overlay_mode == "terminal":
+                    print_terminal_overlay(
+                        frame_file=frame_path.name,
+                        buffer_fill=f"{fill}/{SEQUENCE_LENGTH}",
+                        raw_label=raw_label,
+                        smoothed_label=smoothed_label,
+                        top1_label=top1_label,
+                        top1_prob=top1_prob,
+                        top2_label=top2_label,
+                        top2_prob=top2_prob,
+                        margin=top1_margin,
+                        decision_status=decision_status,
+                        decision_label=decision_label,
+                        tracking_mode=frame_result.tracking_mode,
+                        selected_person_index=frame_result.selected_person_index,
+                        selected_left_person_index=frame_result.selected_left_person_index,
+                        selected_right_person_index=frame_result.selected_right_person_index,
+                        intended_label=intended_label,
+                    )
+
                 if inference_frames % print_every_n == 0:
+                    if overlay_mode == "terminal":
+                        print()
                     severity = "!!" if frame_result.used_prev_frame_copy or frame_result.suspicious_jump else "--"
                     print(
                         f"{severity} frame={frame_path.name} | raw={raw_label} | smooth={smoothed_label} "
                         f"| top3: {compact_top3(raw_probs, id_to_label=id_to_label, top_k=3)} "
+                        f"| top1={top1_label}:{top1_prob:.3f} "
+                        f"top2={top2_label}:{top2_prob:.3f} "
+                        f"margin={top1_margin:.3f} "
+                        f"decision={decision_status}:{decision_label} "
                         f"| people={frame_result.detected_people_count} "
                         f"sel={frame_result.selected_person_index} "
                         f"L={frame_result.selected_left_person_index} "
@@ -361,7 +499,6 @@ def main() -> None:
                         f"tracking_note={frame_result.tracking_note}"
                     )
 
-                top3 = np.argsort(raw_probs)[-3:][::-1]
                 writer.writerow(
                     {
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -369,10 +506,10 @@ def main() -> None:
                         "buffer_fill": f"{fill}/{SEQUENCE_LENGTH}",
                         "raw_prediction": raw_label,
                         "smoothed_prediction": smoothed_label,
-                        "top1_label": id_to_label.get(int(top3[0]), f"class_{int(top3[0])}"),
-                        "top1_prob": float(raw_probs[top3[0]]),
-                        "top2_label": id_to_label.get(int(top3[1]), f"class_{int(top3[1])}"),
-                        "top2_prob": float(raw_probs[top3[1]]),
+                        "top1_label": top1_label,
+                        "top1_prob": top1_prob,
+                        "top2_label": top2_label,
+                        "top2_prob": top2_prob,
                         "top3_label": id_to_label.get(int(top3[2]), f"class_{int(top3[2])}"),
                         "top3_prob": float(raw_probs[top3[2]]),
                         "had_joint_repair": int(frame_result.had_joint_repair),
@@ -387,12 +524,19 @@ def main() -> None:
                         "selected_right_person_index": frame_result.selected_right_person_index,
                         "tracking_note": frame_result.tracking_note,
                         "intended_label": intended_label,
+                        "top1_margin": top1_margin,
+                        "decision_label": decision_label,
+                        "decision_status": decision_status,
+                        "accept_threshold": args.accept_threshold,
+                        "margin_threshold": args.margin_threshold,
                     }
                 )
                 csv_file.flush()
     except KeyboardInterrupt:
         print("\nStopped by user.")
     finally:
+        if overlay_mode == "terminal":
+            print()
         csv_file.close()
         avg_missing_joints = (missing_joint_sum / total_frames) if total_frames > 0 else 0.0
         summary_payload: dict[str, Any] = {
@@ -413,6 +557,10 @@ def main() -> None:
             "raw_prediction_class_counts": dict(raw_class_counts),
             "smoothed_prediction_class_counts": dict(smoothed_class_counts),
             "raw_to_smoothed_disagreements_top10": dict(raw_smoothed_disagreements.most_common(10)),
+            "decision_status_counts": dict(decision_status_counts),
+            "decision_label_counts": dict(decision_label_counts),
+            "accept_threshold": args.accept_threshold,
+            "margin_threshold": args.margin_threshold,
         }
         summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 

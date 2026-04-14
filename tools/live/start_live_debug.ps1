@@ -8,6 +8,15 @@ param(
 
     [switch]$NoQuietWarmup,
 
+    [ValidateRange(0.0, 1.0)]
+    [double]$AcceptThreshold = 0.80,
+
+    [ValidateRange(0.0, 1.0)]
+    [double]$MarginThreshold = 0.20,
+
+    [ValidateSet("terminal", "none")]
+    [string]$OverlayMode = "terminal",
+
     [switch]$KeepJson,
 
     [ValidateRange(0, 600)]
@@ -196,6 +205,9 @@ $classifierArgs = @(
     "-m", "src.inference.live_openpose_debug",
     "--json-dir", $liveJsonDir,
     "--tracking-mode", $TrackingMode,
+    "--accept-threshold", "$AcceptThreshold",
+    "--margin-threshold", "$MarginThreshold",
+    "--overlay-mode", $OverlayMode,
     "--print-every-n", "$PrintEveryN",
     "--log-csv", $logCsvPath
 )
