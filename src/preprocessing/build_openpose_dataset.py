@@ -1,8 +1,8 @@
-"""Build processed OpenPose dataset tensors for the first (preprocessing-only) pipeline.
+"""Build processed OpenPose dataset tensors using the runtime-causal preprocessing path.
 
 This module intentionally focuses on:
 1) Reading raw OpenPose JSON takes
-2) Applying deterministic v1 preprocessing rules
+2) Replaying each take through runtime-safe causal preprocessing rules
 3) Saving fixed-shape NumPy arrays + metadata
 
 It does NOT perform model training.
@@ -21,17 +21,14 @@ import pandas as pd
 import yaml
 
 from src.preprocessing.label_map import get_active_labels
+from src.preprocessing.preprocess_constants import (
+    DEFAULT_CONFIDENCE_CUTOFF,
+    FEATURES_PER_FRAME,
+    SEQUENCE_LENGTH,
+)
+from src.preprocessing.runtime_preprocess import RuntimePreprocessor
 from src.utils.paths import load_paths_config, resolve_path
 
-# -----------------------------
-# Locked schema / preprocessing constants (v1)
-# -----------------------------
-SEQUENCE_LENGTH = 90
-FULL_BODY25_JOINTS = 25
-SELECTED_BODY25_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 15, 16, 17, 18]
-NUM_JOINTS = len(SELECTED_BODY25_INDICES)
-NUM_COORDS = 2  # x, y only for model v1
-FEATURES_PER_FRAME = NUM_JOINTS * NUM_COORDS
 METADATA_COLUMNS = [
     "gesture",
     "person",
@@ -47,59 +44,6 @@ METADATA_COLUMNS = [
     "was_all_zero_sample",
 ]
 
-# Selected upper-body BODY_25 subset indices (local subset order)
-# [Nose, Neck, RShoulder, RElbow, RWrist, LShoulder, LElbow, LWrist,
-#  MidHip, RHip, LHip, REye, LEye, REar, LEar]
-NECK_IDX = 1
-R_SHOULDER_IDX = 2
-L_SHOULDER_IDX = 5
-MID_HIP_IDX = 8
-R_HIP_IDX = 9
-L_HIP_IDX = 10
-
-# Confidence handling (weak filter)
-DEFAULT_CONFIDENCE_CUTOFF = 0.05
-
-# Weighted robust scale candidates
-SHOULDER_WEIGHT = 0.50
-TORSO_WEIGHT = 0.35
-HIP_WEIGHT = 0.15
-
-# Safety / smoothing constants
-MIN_SCALE_EPS = 1e-3
-SAFE_FALLBACK_SCALE = 100.0
-SCALE_SMOOTH_ALPHA_OLD = 0.8
-SCALE_SMOOTH_ALPHA_NEW = 0.2
-
-# Suspicious frame thresholds
-STABLE_JOINTS = [NECK_IDX, L_SHOULDER_IDX, R_SHOULDER_IDX, MID_HIP_IDX]
-MULTI_JOINT_JUMP_SCALE_MULTIPLIER = 1.25
-CENTER_JUMP_SCALE_MULTIPLIER = 1.50
-MULTI_JOINT_MIN_COUNT = 2
-
-# Upper-body subset left/right symmetry pairs for joint-level fallback imputation.
-# Each tuple is (left_joint_index, right_joint_index).
-SYMMETRIC_JOINT_PAIRS: list[tuple[int, int]] = [
-    (2, 5),   # RShoulder <-> LShoulder
-    (3, 6),   # RElbow <-> LElbow
-    (4, 7),   # RWrist <-> LWrist
-    (9, 10),  # RHip <-> LHip
-    (11, 12), # REye <-> LEye
-    (13, 14), # REar <-> LEar
-]
-
-
-@dataclass
-class ParsedFrame:
-    """Container for raw frame data before repair/final flattening."""
-
-    xy: np.ndarray | None
-    usable_mask: np.ndarray | None
-    center_xy: np.ndarray | None
-    current_scale: float | None
-    is_bad: bool
-
-
 @dataclass
 class SampleResult:
     """Processed output for one take folder."""
@@ -114,439 +58,56 @@ class SampleResult:
     was_all_zero_sample: bool
 
 
-def _load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _safe_distance(xy: np.ndarray, usable_mask: np.ndarray, a_idx: int, b_idx: int) -> float | None:
-    """Return Euclidean distance if both joints are usable, else None."""
-    if not usable_mask[a_idx] or not usable_mask[b_idx]:
-        return None
-    dist = float(np.linalg.norm(xy[a_idx] - xy[b_idx]))
-    if dist <= 0:
-        return None
-    return dist
-
-
-def _choose_center(xy: np.ndarray, usable_mask: np.ndarray) -> np.ndarray | None:
-    """Primary center: Neck. Fallback center: MidHip."""
-    if usable_mask[NECK_IDX]:
-        return xy[NECK_IDX]
-    if usable_mask[MID_HIP_IDX]:
-        return xy[MID_HIP_IDX]
-    return None
-
-
-def _compute_weighted_scale(xy: np.ndarray, usable_mask: np.ndarray) -> float | None:
-    """Compute weighted scale from available body distances."""
-    candidates: list[tuple[float, float]] = []
-
-    shoulder = _safe_distance(xy, usable_mask, L_SHOULDER_IDX, R_SHOULDER_IDX)
-    if shoulder is not None:
-        candidates.append((shoulder, SHOULDER_WEIGHT))
-
-    torso = _safe_distance(xy, usable_mask, NECK_IDX, MID_HIP_IDX)
-    if torso is not None:
-        candidates.append((torso, TORSO_WEIGHT))
-
-    hip = _safe_distance(xy, usable_mask, L_HIP_IDX, R_HIP_IDX)
-    if hip is not None:
-        candidates.append((hip, HIP_WEIGHT))
-
-    if not candidates:
-        return None
-
-    weighted_sum = sum(v * w for v, w in candidates)
-    sum_weights = sum(w for _, w in candidates)
-    return weighted_sum / sum_weights
-
-
-def _is_suspicious_frame(
-    current_xy: np.ndarray,
-    current_center: np.ndarray,
-    current_scale: float,
-    current_usable: np.ndarray,
-    prev_accepted_xy: np.ndarray | None,
-    prev_accepted_center: np.ndarray | None,
-    prev_accepted_usable: np.ndarray | None,
-) -> bool:
-    """Detect likely identity switch / catastrophic body jump.
-
-    A frame is suspicious if:
-    - at least two stable joints each jump > 1.25 * current_scale, OR
-    - body center jump > 1.5 * current_scale.
-    """
-    if (
-        prev_accepted_xy is None
-        or prev_accepted_center is None
-        or prev_accepted_usable is None
-        or current_scale <= 0
-    ):
-        return False
-
-    jump_threshold = MULTI_JOINT_JUMP_SCALE_MULTIPLIER * current_scale
-    center_threshold = CENTER_JUMP_SCALE_MULTIPLIER * current_scale
-
-    moved_count = 0
-    for idx in STABLE_JOINTS:
-        if current_usable[idx] and prev_accepted_usable[idx]:
-            move_dist = float(np.linalg.norm(current_xy[idx] - prev_accepted_xy[idx]))
-            if move_dist > jump_threshold:
-                moved_count += 1
-
-    if moved_count >= MULTI_JOINT_MIN_COUNT:
-        return True
-
-    center_jump = float(np.linalg.norm(current_center - prev_accepted_center))
-    return center_jump > center_threshold
-
-
-def _parse_frame(frame_json_path: Path, confidence_cutoff: float) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Read one OpenPose frame and return (xy, usable_joint_mask).
-
-    If no people exist, returns (None, None).
-    """
-    frame_data = _load_json(frame_json_path)
-    people = frame_data.get("people", [])
-    if not people:
-        return None, None
-
-    keypoints = people[0].get("pose_keypoints_2d", [])
-    if len(keypoints) < FULL_BODY25_JOINTS * 3:
-        return None, None
-
-    arr = np.asarray(keypoints, dtype=np.float32).reshape(FULL_BODY25_JOINTS, 3)
-    arr = arr[SELECTED_BODY25_INDICES, :]
-
-    # Keep x/y only for model v1 (do not flatten yet).
-    xy = arr[:, :2].copy()
-    conf = arr[:, 2]
-
-    # Weak confidence handling: only mark unusable when confidence is extremely low.
-    usable_mask = conf >= confidence_cutoff
-    return xy, usable_mask
-
-
 def _collect_take_frame_paths(take_dir: Path) -> list[Path]:
     """Collect and lexicographically sort JSON frame files for one take."""
     return sorted(p for p in take_dir.iterdir() if p.is_file() and p.suffix == ".json")
 
 
-def _build_symmetric_counterpart_map() -> dict[int, int]:
-    """Build index -> mirrored counterpart lookup from pair list."""
-    counterpart_map: dict[int, int] = {}
-    for a_idx, b_idx in SYMMETRIC_JOINT_PAIRS:
-        counterpart_map[a_idx] = b_idx
-        counterpart_map[b_idx] = a_idx
-    return counterpart_map
-
-
-def _impute_joint_values_temporally(
-    sample_90x15x2: np.ndarray,
-    usable_90x15: np.ndarray,
-) -> tuple[np.ndarray, int]:
-    """Fill joint-level gaps over time for each joint independently.
-
-    Policy:
-    - Interior missing region: linear interpolation between nearest valid neighbors.
-    - Leading missing region: backfill from first valid frame.
-    - Trailing missing region: forward-fill from last valid frame.
-
-    Returns:
-        (imputed_xy, num_interpolated_joint_frames)
-    """
-    imputed = sample_90x15x2.copy()
-    seq_len, num_joints, _ = imputed.shape
-    num_interpolations = 0
-
-    for joint_idx in range(num_joints):
-        valid_mask = usable_90x15[:, joint_idx]
-        valid_indices = np.flatnonzero(valid_mask)
-
-        # If the joint is missing for the full take, leave it for symmetry/zero fallback.
-        if len(valid_indices) == 0:
-            continue
-
-        first_valid = int(valid_indices[0])
-        last_valid = int(valid_indices[-1])
-
-        # Beginning of take: copy the first valid value backwards.
-        if first_valid > 0:
-            imputed[:first_valid, joint_idx, :] = imputed[first_valid, joint_idx, :]
-            num_interpolations += first_valid
-
-        # End of take: copy the last valid value forwards.
-        if last_valid < seq_len - 1:
-            trailing_count = (seq_len - 1) - last_valid
-            imputed[last_valid + 1 :, joint_idx, :] = imputed[last_valid, joint_idx, :]
-            num_interpolations += trailing_count
-
-        # Interior gaps: linearly interpolate x/y together between valid anchors.
-        for left_idx, right_idx in zip(valid_indices[:-1], valid_indices[1:]):
-            gap = int(right_idx - left_idx - 1)
-            if gap <= 0:
-                continue
-
-            left_xy = imputed[left_idx, joint_idx, :]
-            right_xy = imputed[right_idx, joint_idx, :]
-            for offset in range(1, gap + 1):
-                alpha = offset / (gap + 1)
-                fill_idx = left_idx + offset
-                imputed[fill_idx, joint_idx, :] = (1.0 - alpha) * left_xy + alpha * right_xy
-                num_interpolations += 1
-
-    return imputed, num_interpolations
-
-
-def _fill_entirely_missing_joints_with_symmetry(
-    sample_90x15x2: np.ndarray,
-    usable_90x15: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, int]:
-    """Fill joints missing in all frames by mirroring symmetric counterpart if possible.
-
-    Mirroring uses the centered-body axis from normalization:
-      mirrored_x = -x
-      mirrored_y = y
-
-    Returns:
-        (updated_xy, updated_usable_mask, num_symmetric_joint_fills)
-    """
-    filled = sample_90x15x2.copy()
-    usable_after = usable_90x15.copy()
-    counterpart_map = _build_symmetric_counterpart_map()
-    num_symmetric_fills = 0
-
-    for joint_idx in range(NUM_JOINTS):
-        # Only target joints that are fully missing across the take.
-        if np.any(usable_after[:, joint_idx]):
-            continue
-
-        counterpart_idx = counterpart_map.get(joint_idx)
-        if counterpart_idx is None:
-            continue
-
-        counterpart_usable = usable_after[:, counterpart_idx]
-        if not np.any(counterpart_usable):
-            continue
-
-        # Mirror full sequence from counterpart (x flips sign, y stays).
-        filled[:, joint_idx, 0] = -filled[:, counterpart_idx, 0]
-        filled[:, joint_idx, 1] = filled[:, counterpart_idx, 1]
-        usable_after[:, joint_idx] = True
-        num_symmetric_fills += SEQUENCE_LENGTH
-
-    return filled, usable_after, num_symmetric_fills
-
-
 def _build_sample_from_take(take_dir: Path, confidence_cutoff: float) -> SampleResult:
-    """Convert one take folder into a fixed sample with shape (90, 30)."""
+    """Convert one take folder into a fixed sample with shape (90, 30).
+
+    The take is replayed frame-by-frame through RuntimePreprocessor so dataset
+    samples are built from the exact same causal preprocessing logic used live.
+    """
     json_paths = _collect_take_frame_paths(take_dir)
     num_raw_frames = len(json_paths)
+    runtime = RuntimePreprocessor(confidence_cutoff=confidence_cutoff)
+    causal_frames: list[np.ndarray] = []
 
-    # Enforce exactly 90 timeline slots.
-    if len(json_paths) >= SEQUENCE_LENGTH:
-        timeline_paths: list[Path | None] = json_paths[:SEQUENCE_LENGTH]
-    else:
-        timeline_paths = json_paths + [None] * (SEQUENCE_LENGTH - len(json_paths))
+    num_bad_frames = 0
+    for frame_path in json_paths[:SEQUENCE_LENGTH]:
+        runtime_result = runtime.process_json_path(frame_path)
+        causal_frames.append(runtime_result.features_30)
+        if runtime_result.used_prev_frame_copy:
+            # Keep frame-level bad count semantics as close as practical:
+            # whole-frame fallbacks (no person / no center / suspicious jump).
+            num_bad_frames += 1
 
-    parsed_frames: list[ParsedFrame] = []
-
-    prev_valid_scale: float | None = None
-    prev_smoothed_scale: float | None = None
-
-    prev_accepted_xy: np.ndarray | None = None
-    prev_accepted_center: np.ndarray | None = None
-    prev_accepted_usable: np.ndarray | None = None
-
-    for frame_path in timeline_paths:
-        if frame_path is None:
-            parsed_frames.append(
-                ParsedFrame(
-                    xy=None,
-                    usable_mask=None,
-                    center_xy=None,
-                    current_scale=None,
-                    is_bad=True,
-                )
-            )
-            continue
-
-        xy, usable_mask = _parse_frame(frame_path, confidence_cutoff)
-        if xy is None or usable_mask is None:
-            parsed_frames.append(
-                ParsedFrame(
-                    xy=None,
-                    usable_mask=None,
-                    center_xy=None,
-                    current_scale=None,
-                    is_bad=True,
-                )
-            )
-            continue
-
-        center = _choose_center(xy, usable_mask)
-        if center is None:
-            parsed_frames.append(
-                ParsedFrame(
-                    xy=None,
-                    usable_mask=None,
-                    center_xy=None,
-                    current_scale=None,
-                    is_bad=True,
-                )
-            )
-            continue
-
-        computed_scale = _compute_weighted_scale(xy, usable_mask)
-        if computed_scale is None:
-            if prev_valid_scale is not None:
-                current_scale = prev_valid_scale
-            else:
-                current_scale = SAFE_FALLBACK_SCALE
+    padding_count = max(0, SEQUENCE_LENGTH - len(causal_frames))
+    if padding_count > 0:
+        # Causal short-take padding: extend with the latest emitted runtime frame
+        # (or zeros if no frame was ever emitted), never with future interpolation.
+        if causal_frames:
+            pad_frame = causal_frames[-1].copy()
         else:
-            current_scale = computed_scale
+            pad_frame = np.zeros(FEATURES_PER_FRAME, dtype=np.float32)
+        for _ in range(padding_count):
+            causal_frames.append(pad_frame.copy())
+        num_bad_frames += padding_count
 
-        current_scale = max(float(current_scale), MIN_SCALE_EPS)
-
-        suspicious = _is_suspicious_frame(
-            current_xy=xy,
-            current_center=center,
-            current_scale=current_scale,
-            current_usable=usable_mask,
-            prev_accepted_xy=prev_accepted_xy,
-            prev_accepted_center=prev_accepted_center,
-            prev_accepted_usable=prev_accepted_usable,
-        )
-
-        if suspicious:
-            parsed_frames.append(
-                ParsedFrame(
-                    xy=None,
-                    usable_mask=None,
-                    center_xy=None,
-                    current_scale=None,
-                    is_bad=True,
-                )
-            )
-            continue
-
-        # Smooth scale only after the frame is accepted.
-        if prev_smoothed_scale is None:
-            smoothed_scale = current_scale
-        else:
-            smoothed_scale = (
-                SCALE_SMOOTH_ALPHA_OLD * prev_smoothed_scale
-                + SCALE_SMOOTH_ALPHA_NEW * current_scale
-            )
-
-        smoothed_scale = max(float(smoothed_scale), MIN_SCALE_EPS)
-
-        normalized_xy = (xy - center[None, :]) / smoothed_scale
-
-        parsed_frames.append(
-            ParsedFrame(
-                xy=normalized_xy,
-                usable_mask=usable_mask,
-                center_xy=center,
-                current_scale=smoothed_scale,
-                is_bad=False,
-            )
-        )
-
-        prev_valid_scale = current_scale
-        prev_smoothed_scale = smoothed_scale
-        prev_accepted_xy = xy
-        prev_accepted_center = center
-        prev_accepted_usable = usable_mask
-
-    # -----------------------------
-    # Bad frame repair pass
-    # -----------------------------
-    good_indices = [idx for idx, fr in enumerate(parsed_frames) if not fr.is_bad and fr.xy is not None]
-
-    if not good_indices:
-        # Entire take is unusable.
-        sample_90x30 = np.zeros((SEQUENCE_LENGTH, FEATURES_PER_FRAME), dtype=np.float32)
-        return SampleResult(
-            sample_90x30=sample_90x30,
-            num_raw_frames=num_raw_frames,
-            num_bad_frames=SEQUENCE_LENGTH,
-            num_joint_zero_fallbacks=SEQUENCE_LENGTH * NUM_JOINTS,
-            num_joint_interpolations=0,
-            num_joint_symmetric_fills=0,
-            used_future_fill_for_start=False,
-            was_all_zero_sample=True,
-        )
-
-    repaired_frames: list[np.ndarray | None] = [fr.xy.copy() if fr.xy is not None else None for fr in parsed_frames]
-
-    first_good = good_indices[0]
-    used_future_fill_for_start = first_good > 0
-
-    # Fill bad leading frames with first future valid frame.
-    if first_good > 0:
-        first_good_frame = repaired_frames[first_good]
-        assert first_good_frame is not None
-        for idx in range(0, first_good):
-            repaired_frames[idx] = first_good_frame.copy()
-
-    # Copy-forward fill for all other bad frames.
-    last_valid = repaired_frames[first_good]
-    assert last_valid is not None
-    for idx in range(first_good + 1, SEQUENCE_LENGTH):
-        if repaired_frames[idx] is None:
-            repaired_frames[idx] = last_valid.copy()
-        else:
-            last_valid = repaired_frames[idx]
-
-    # Convert repaired timeline to dense array for joint-level imputation work.
-    sample_90x15x2 = np.stack(repaired_frames, axis=0).astype(np.float32)
-    usable_90x15 = np.stack(
-        [
-            fr.usable_mask.copy() if fr.usable_mask is not None else np.zeros(NUM_JOINTS, dtype=bool)
-            for fr in parsed_frames
-        ],
-        axis=0,
-    )
-
-    # -----------------------------
-    # Joint-level imputation pass (v1)
-    # -----------------------------
-    # 1) Temporal interpolation/backfill/forward-fill for each joint independently.
-    sample_90x15x2, num_joint_interpolations = _impute_joint_values_temporally(
-        sample_90x15x2=sample_90x15x2,
-        usable_90x15=usable_90x15,
-    )
-
-    # 2) Entirely missing joint fallback: mirror symmetric counterpart if available.
-    sample_90x15x2, usable_after_symmetry, num_joint_symmetric_fills = (
-        _fill_entirely_missing_joints_with_symmetry(
-            sample_90x15x2=sample_90x15x2,
-            usable_90x15=usable_90x15,
-        )
-    )
-
-    # 3) Last-resort zero fallback for any joint/frame slots still unusable.
-    missing_after_all = ~usable_after_symmetry
-    num_joint_zero_fallbacks = int(np.count_nonzero(missing_after_all))
-    if num_joint_zero_fallbacks > 0:
-        sample_90x15x2[missing_after_all] = 0.0
-
-    # Final flattening shape remains (90, 30).
-    sample_90x30 = sample_90x15x2.reshape(SEQUENCE_LENGTH, FEATURES_PER_FRAME)
-
-    num_bad_frames = sum(fr.is_bad for fr in parsed_frames)
+    sample_90x30 = np.stack(causal_frames, axis=0).astype(np.float32)
 
     return SampleResult(
         sample_90x30=sample_90x30,
         num_raw_frames=num_raw_frames,
         num_bad_frames=num_bad_frames,
-        num_joint_zero_fallbacks=num_joint_zero_fallbacks,
-        num_joint_interpolations=num_joint_interpolations,
-        num_joint_symmetric_fills=num_joint_symmetric_fills,
-        used_future_fill_for_start=used_future_fill_for_start,
-        was_all_zero_sample=False,
+        # Legacy metadata fields kept for compatibility; future-aware/interpolation
+        # path is now retired in favor of runtime-causal replay.
+        num_joint_zero_fallbacks=0,
+        num_joint_interpolations=0,
+        num_joint_symmetric_fills=0,
+        used_future_fill_for_start=False,
+        was_all_zero_sample=bool(np.all(sample_90x30 == 0.0)),
     )
 
 
@@ -717,7 +278,7 @@ def build_openpose_dataset(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build processed OpenPose dataset (v1 preprocessing, no training)."
+        description="Build processed OpenPose dataset via runtime-causal preprocessing replay."
     )
     parser.add_argument(
         "--confidence-cutoff",

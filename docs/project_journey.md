@@ -808,3 +808,38 @@ This is a more reliable bridge toward Unity integration, where event stability m
 
 Before changing model architecture again, improving event logic first and retesting live behavior is the right order of operations.
 This keeps iteration focused on the actual bottleneck observed in recent real-time runs.
+
+## Preprocessing unification: training dataset build now replays runtime-causal preprocessing
+
+### What we observed
+
+Even after meaningful model and decision-layer improvements, true live behavior remained materially worse than expected from offline results.
+That gap pushed us to inspect not only model outputs, but the full live framework and preprocessing path used before the classifier.
+
+### Mismatch identified
+
+We confirmed an important train/live inconsistency:
+
+- training dataset build was still using future-aware cleanup behavior (including start-of-sequence future fill and interpolation-style repairs),
+- while live runtime preprocessing is causal and conservative (no future-frame interpolation, previous-frame copy fallback, runtime-safe repair flow).
+
+### Conclusion
+
+We cannot afford to train on a different preprocessing regime than the one live inference actually receives.
+If the model is trained on cleaner future-informed sequences than runtime can produce, offline evaluation will systematically overestimate live robustness.
+
+### What changed
+
+Dataset building now replays every take frame-by-frame through the same runtime preprocessor used in live inference.
+Each sample is still emitted in the same training contract shape `(90, 30)`, but those frames now come from causal runtime-style preprocessing rather than a separate future-aware dataset-only repair path.
+
+For short takes, padding is now causal (repeat latest emitted frame, or zeros when no frame exists), avoiding future-aware interpolation.
+
+### Why it matters
+
+This should reduce train/live distribution mismatch and make offline results a more trustworthy proxy for real live behavior.
+It also gives a cleaner foundation for subsequent threshold/model tuning by removing a known preprocessing confounder.
+
+### Current takeaway
+
+Align preprocessing first, then reevaluate live performance before changing architecture again.

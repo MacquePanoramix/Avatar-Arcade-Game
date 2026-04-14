@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from src.preprocessing.build_openpose_dataset import (
+from src.preprocessing.preprocess_constants import (
     CENTER_JUMP_SCALE_MULTIPLIER,
     DEFAULT_CONFIDENCE_CUTOFF,
     FEATURES_PER_FRAME,

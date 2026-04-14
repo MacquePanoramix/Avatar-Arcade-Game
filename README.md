@@ -284,15 +284,17 @@ The command writes:
 - `data/processed/metadata.csv` (one row per sample)
 - `data/processed/label_map.json` (target mode + label mappings)
 
-### v1 normalization / repair choices
+### Causal preprocessing alignment (dataset build + live runtime)
 
 - Uses an upper-body BODY_25 subset (15 joints), `x,y` only.
 - Uses `Neck` as center anchor with `MidHip` fallback.
 - Uses robust weighted body scale from shoulder width / torso length / hip width.
 - Smooths accepted frame scale over time (`0.8 * prev + 0.2 * current`).
 - Marks likely identity-switch/catastrophic jumps as bad frames.
-- Repairs bad frames by copy-forward (and future-fill for bad leading frames).
-- If a whole take has no valid frames, fills the sample with zeros and records that in metadata.
+- Dataset building now replays each take frame-by-frame through `RuntimePreprocessor` (the same causal logic used in live inference).
+- No future-frame interpolation/future-fill is used during dataset creation.
+- Short takes are padded causally by repeating the latest emitted runtime frame (or zeros if no frame was emitted).
+- This reduces train/live preprocessing mismatch so offline metrics better reflect live behavior.
 
 ## Baseline training runs (LSTM + MLP)
 
