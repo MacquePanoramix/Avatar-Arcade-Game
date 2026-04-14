@@ -1054,3 +1054,38 @@ Why this matters:
 Current takeaway:
 
 - the model pipeline is now packaged in a side-stable, runtime-ready output format that Unity can poll directly (`latest_prediction.json`) for both players.
+
+## Final live usability polish + project conclusion
+
+### Final polish step
+
+- After true dual-player live output was working, the remaining testing convenience gap was visual: two-player window HUD support.
+- A split left/right testing HUD was added so both players can be monitored visually during live tests without relying only on terminal output.
+- This was intentionally additive and non-invasive: the working inference logic, JSON outputs, and integration behavior were preserved.
+
+### Final technical outcome
+
+- The project reached a competent live version of the model and runtime pipeline.
+- Offline performance became strong after the active-range-aware short representation.
+- Live behavior improved substantially after:
+  - runtime-causal preprocessing alignment,
+  - active-range-aware temporal resampling,
+  - live source-FPS alignment,
+  - dynamic live FPS estimation,
+  - contiguous motion-active-span live input construction,
+  - and motion-aware gating.
+- The final runtime now supports:
+  - stable single-player live behavior,
+  - true side-consistent two-player live behavior,
+  - Unity-friendly JSON output for direct polling,
+  - and test-friendly visual/terminal monitoring.
+
+### Practical conclusion
+
+- The main project goal was no longer just training a classifier, but making it operational for a game prototype.
+- By the end of this journey, the system became usable as a real bridge from OpenPose input to gameplay-side integration.
+
+### Honest final takeaway
+
+- The strongest improvements came not from endlessly changing the model architecture, but from fixing data quality, temporal representation, train/live consistency, and runtime integration details.
+- The final result is a working applied pipeline, not only an offline ML experiment.

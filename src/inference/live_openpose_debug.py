@@ -566,6 +566,91 @@ def draw_window_overlay(
     cv2.waitKey(1)
 
 
+def _resolve_two_player_hud_values(side_payload: dict[str, Any]) -> dict[str, Any]:
+    tracked = bool(side_payload.get("tracked", False))
+    if not tracked:
+        return {
+            "tracked_text": "NO",
+            "person_index": side_payload.get("person_index"),
+            "raw_label": "idle",
+            "smoothed_label": "idle",
+            "decision_status": "NO_ACTION",
+            "decision_label": "NO_ACTION",
+            "final_action_status": "NO_TRIGGER",
+            "final_action_label": "",
+            "motion_active": False,
+            "top1_prob": 0.0,
+            "estimated_live_fps": side_payload.get("estimated_live_fps"),
+            "classifier_input_source_mode": side_payload.get("classifier_input_source_mode"),
+            "active_span_length_frames": side_payload.get("active_span_length_frames"),
+        }
+    return {
+        "tracked_text": "YES",
+        "person_index": side_payload.get("person_index"),
+        "raw_label": str(side_payload.get("raw_label", "idle")),
+        "smoothed_label": str(side_payload.get("smoothed_label", "idle")),
+        "decision_status": str(side_payload.get("decision_status", "NO_ACTION")),
+        "decision_label": str(side_payload.get("decision_label", "NO_ACTION")),
+        "final_action_status": str(side_payload.get("final_action_status", "NO_TRIGGER")),
+        "final_action_label": str(side_payload.get("final_action_label", "")),
+        "motion_active": bool(side_payload.get("motion_active", False)),
+        "top1_prob": float(side_payload.get("top1_prob", 0.0)),
+        "estimated_live_fps": side_payload.get("estimated_live_fps"),
+        "classifier_input_source_mode": side_payload.get("classifier_input_source_mode"),
+        "active_span_length_frames": side_payload.get("active_span_length_frames"),
+    }
+
+
+def draw_two_player_window_overlay(*, frame_file: str, players_payload: dict[str, dict[str, Any]]) -> None:
+    if cv2 is None:
+        return
+    canvas = np.full((900, 1600, 3), 24, dtype=np.uint8)
+    white = (235, 235, 235)
+    gray = (170, 170, 170)
+    green = (60, 220, 60)
+    amber = (0, 180, 240)
+
+    half_width = canvas.shape[1] // 2
+    cv2.line(canvas, (half_width, 0), (half_width, canvas.shape[0]), (75, 75, 75), 2, cv2.LINE_AA)
+
+    for side_name, start_x in (("LEFT", 40), ("RIGHT", half_width + 40)):
+        side_key = side_name.lower()
+        values = _resolve_two_player_hud_values(players_payload.get(side_key, {"tracked": False, "person_index": None}))
+        final_status = values["final_action_status"]
+        decision_status = values["decision_status"]
+        side_color = green if final_status == "TRIGGER" else (amber if decision_status == "ACCEPT" else white)
+        final_label = values["final_action_label"] or "-"
+        motion_text = "YES" if values["motion_active"] else "NO"
+        classifier_source = values["classifier_input_source_mode"] or "-"
+        active_span_len = values["active_span_length_frames"]
+        active_span_text = "-" if active_span_len is None else str(active_span_len)
+        fps_value = values["estimated_live_fps"]
+        fps_text = "-" if fps_value is None else f"{float(fps_value):.2f}"
+
+        lines = [
+            f"TRACKED: {values['tracked_text']}    PERSON_INDEX: {values['person_index']}",
+            f"RAW: {values['raw_label']}",
+            f"SMOOTH: {values['smoothed_label']}",
+            f"DECISION: {decision_status}:{values['decision_label']}",
+            f"FINAL: {final_status}:{final_label}",
+            f"MOTION_ACTIVE: {motion_text}",
+            f"TOP1_PROB: {values['top1_prob']:.2f}",
+            f"ESTIMATED_LIVE_FPS: {fps_text}",
+            f"INPUT_SOURCE: {classifier_source}",
+            f"ACTIVE_SPAN_LENGTH: {active_span_text}",
+        ]
+
+        cv2.putText(canvas, side_name, (start_x, 70), cv2.FONT_HERSHEY_DUPLEX, 1.6, white, 3, cv2.LINE_AA)
+        for idx, line in enumerate(lines):
+            y = 150 + (idx * 66)
+            color = side_color if idx in {3, 4} else white
+            cv2.putText(canvas, line, (start_x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
+
+    cv2.putText(canvas, f"frame: {frame_file}", (40, 860), cv2.FONT_HERSHEY_SIMPLEX, 0.65, gray, 1, cv2.LINE_AA)
+    cv2.imshow("Live Gesture HUD", canvas)
+    cv2.waitKey(1)
+
+
 def build_safe_player_payload(*, tracked: bool, person_index: int | None) -> dict[str, Any]:
     return {
         "tracked": bool(tracked),
@@ -921,6 +1006,7 @@ def main() -> None:
                         ),
                     }
                     players_payload: dict[str, dict[str, Any]] = {}
+                    players_overlay_payload: dict[str, dict[str, Any]] = {}
                     for side, (side_features, side_tracked, side_person_index) in side_candidates.items():
                         state = player_states[side]
                         now_ts = time.perf_counter()
@@ -982,6 +1068,12 @@ def main() -> None:
                             payload = build_safe_player_payload(tracked=side_tracked, person_index=side_person_index)
                             payload["motion_active"] = bool(state.motion_active)
                             players_payload[side] = payload
+                            players_overlay_payload[side] = {
+                                **payload,
+                                "estimated_live_fps": state.estimated_live_fps,
+                                "classifier_input_source_mode": "warmup",
+                                "active_span_length_frames": 0,
+                            }
                             writer.writerow(
                                 {
                                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -1164,6 +1256,12 @@ def main() -> None:
                             "motion_active": bool(state.motion_active),
                             "top1_prob": smoothed_top1_prob,
                         }
+                        players_overlay_payload[side] = {
+                            **players_payload[side],
+                            "estimated_live_fps": state.estimated_live_fps,
+                            "classifier_input_source_mode": classifier_input_source_mode,
+                            "active_span_length_frames": int(active_meta["active_span_length_frames"]),
+                        }
                         writer.writerow(
                             {
                                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -1243,6 +1341,11 @@ def main() -> None:
                             f"raw={right_payload['raw_label']} smooth={right_payload['smoothed_label']} "
                             f"decision={right_payload['decision_status']}:{right_payload['decision_label']} "
                             f"trigger={right_payload['final_action_status']}:{right_payload['final_action_label'] or '-'}"
+                        )
+                    if effective_overlay_mode in {"window", "both"}:
+                        draw_two_player_window_overlay(
+                            frame_file=frame_path.name,
+                            players_payload=players_overlay_payload,
                         )
                     output_payload = {
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),

@@ -249,6 +249,8 @@ python -m src.inference.live_openpose_debug \
 
 Use `--tracking-mode two_player_left_right` to keep **left** and **right** players as independent live streams.
 Each side has its own causal buffer, motion state, EMA smoothing, decision gate, and trigger/cooldown state.
+Terminal overlay already works for this mode, and window overlay now includes a split left/right testing HUD.
+For Unity integration, JSON output remains the recommended bridge (`--output-latest-json` / `--output-jsonl`).
 
 Recommended Unity path:
 
@@ -265,7 +267,7 @@ python -m src.inference.live_openpose_debug \
   --tracking-mode two_player_left_right \
   --output-latest-json logs/inference/latest_prediction.json \
   --output-jsonl logs/inference/live_predictions.jsonl \
-  --overlay-mode terminal
+  --overlay-mode both
 ```
 
 JSON shape (latest + JSONL rows):
