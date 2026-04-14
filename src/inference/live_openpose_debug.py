@@ -150,7 +150,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Unlock trigger hold protection after this many consecutive release frames. "
             "A release frame is any frame where decision=NO_ACTION, raw/smoothed label is idle, "
-            "or top1 confidence is below accept threshold."
+            "or smoothed gate top1 confidence is below accept threshold."
         ),
     )
     return parser.parse_args()
@@ -218,11 +218,11 @@ def print_terminal_overlay(
     buffer_fill: str,
     raw_label: str,
     smoothed_label: str,
-    top1_label: str,
-    top1_prob: float,
-    top2_label: str,
-    top2_prob: float,
-    margin: float,
+    gate_top1_label: str,
+    gate_top1_prob: float,
+    gate_top2_label: str,
+    gate_top2_prob: float,
+    gate_margin: float,
     decision_status: str,
     decision_label: str,
     final_action_status: str,
@@ -242,7 +242,8 @@ def print_terminal_overlay(
 ) -> None:
     line = (
         f"frame={frame_file} | fill={buffer_fill} | raw={raw_label} | smooth={smoothed_label} | "
-        f"top1={top1_label}({top1_prob:.2f}) | top2={top2_label}({top2_prob:.2f}) | margin={margin:.2f} | "
+        f"gate_top1={gate_top1_label}({gate_top1_prob:.2f}) | "
+        f"gate_top2={gate_top2_label}({gate_top2_prob:.2f}) | margin={gate_margin:.2f} | "
         f"decision={decision_status}:{decision_label} | "
         f"trigger={final_action_status}:{final_action_label or '-'} "
         f"(streak={current_accept_streak}/{trigger_streak_required}, cd={current_cooldown_remaining}) | "
@@ -264,11 +265,11 @@ def draw_window_overlay(
     decision_label: str,
     raw_label: str,
     smoothed_label: str,
-    top1_label: str,
-    top1_prob: float,
-    top2_label: str,
-    top2_prob: float,
-    margin: float,
+    gate_top1_label: str,
+    gate_top1_prob: float,
+    gate_top2_label: str,
+    gate_top2_prob: float,
+    gate_margin: float,
     current_accept_streak: int,
     trigger_streak_required: int,
     current_cooldown_remaining: int,
@@ -309,7 +310,10 @@ def draw_window_overlay(
     cv2.putText(canvas, f"raw={raw_label}   smooth={smoothed_label}", (40, 330), cv2.FONT_HERSHEY_SIMPLEX, 1.0, white, 2, cv2.LINE_AA)
     cv2.putText(
         canvas,
-        f"top1={top1_label} ({top1_prob:.2f})   top2={top2_label} ({top2_prob:.2f})   margin={margin:.2f}",
+        (
+            f"gate_top1={gate_top1_label} ({gate_top1_prob:.2f})   "
+            f"gate_top2={gate_top2_label} ({gate_top2_prob:.2f})   margin={gate_margin:.2f}"
+        ),
         (40, 390),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.95,
@@ -429,6 +433,12 @@ def main() -> None:
             "tracking_note",
             "intended_label",
             "top1_margin",
+            "smoothed_top1_label",
+            "smoothed_top1_prob",
+            "smoothed_top2_label",
+            "smoothed_top2_prob",
+            "smoothed_top1_margin",
+            "decision_source",
             "decision_label",
             "decision_status",
             "accept_threshold",
@@ -469,7 +479,7 @@ def main() -> None:
     print(
         "Trigger hold lock release: "
         f"{args.release_idle_frames} consecutive release frames "
-        "(NO_ACTION or idle raw/smoothed or confidence below threshold)"
+        "(NO_ACTION or idle raw/smoothed or smoothed gate confidence below threshold)"
     )
     print(f"Intended label: {intended_label or '(none)'}")
     print("Press Ctrl+C to stop.\n")
@@ -584,6 +594,12 @@ def main() -> None:
                             "tracking_note": frame_result.tracking_note,
                             "intended_label": intended_label,
                             "top1_margin": "",
+                            "smoothed_top1_label": "",
+                            "smoothed_top1_prob": "",
+                            "smoothed_top2_label": "",
+                            "smoothed_top2_prob": "",
+                            "smoothed_top1_margin": "",
+                            "decision_source": "smoothed_probs",
                             "decision_label": "",
                             "decision_status": "",
                             "accept_threshold": args.accept_threshold,
@@ -630,16 +646,25 @@ def main() -> None:
                     raw_smoothed_disagreements[f"{raw_label} -> {smoothed_label}"] += 1
 
                 top3 = np.argsort(raw_probs)[-3:][::-1]
-                top1_idx = int(top3[0])
-                top2_idx = int(top3[1])
-                top1_label = id_to_label.get(top1_idx, f"class_{top1_idx}")
-                top2_label = id_to_label.get(top2_idx, f"class_{top2_idx}")
-                top1_prob = float(raw_probs[top1_idx])
-                top2_prob = float(raw_probs[top2_idx])
+                raw_top1_idx = int(top3[0])
+                raw_top2_idx = int(top3[1])
+                raw_top1_label = id_to_label.get(raw_top1_idx, f"class_{raw_top1_idx}")
+                raw_top2_label = id_to_label.get(raw_top2_idx, f"class_{raw_top2_idx}")
+                raw_top1_prob = float(raw_probs[raw_top1_idx])
+                raw_top2_prob = float(raw_probs[raw_top2_idx])
+                raw_top1_margin = float(raw_top1_prob - raw_top2_prob)
+
+                smoothed_top3 = np.argsort(ema_probs)[-3:][::-1]
+                smoothed_top1_idx = int(smoothed_top3[0])
+                smoothed_top2_idx = int(smoothed_top3[1])
+                smoothed_top1_label = id_to_label.get(smoothed_top1_idx, f"class_{smoothed_top1_idx}")
+                smoothed_top2_label = id_to_label.get(smoothed_top2_idx, f"class_{smoothed_top2_idx}")
+                smoothed_top1_prob = float(ema_probs[smoothed_top1_idx])
+                smoothed_top2_prob = float(ema_probs[smoothed_top2_idx])
                 decision_label, decision_status, top1_margin = decide_action(
-                    top1_label=top1_label,
-                    top1_prob=top1_prob,
-                    top2_prob=top2_prob,
+                    top1_label=smoothed_top1_label,
+                    top1_prob=smoothed_top1_prob,
+                    top2_prob=smoothed_top2_prob,
                     accept_threshold=float(args.accept_threshold),
                     margin_threshold=float(args.margin_threshold),
                 )
@@ -653,7 +678,7 @@ def main() -> None:
                     decision_status == "NO_ACTION"
                     or raw_label == "idle"
                     or smoothed_label == "idle"
-                    or top1_prob < args.accept_threshold
+                    or smoothed_top1_prob < args.accept_threshold
                 )
                 if trigger_locked:
                     if release_frame:
@@ -705,11 +730,11 @@ def main() -> None:
                         buffer_fill=f"{fill}/{SEQUENCE_LENGTH}",
                         raw_label=raw_label,
                         smoothed_label=smoothed_label,
-                        top1_label=top1_label,
-                        top1_prob=top1_prob,
-                        top2_label=top2_label,
-                        top2_prob=top2_prob,
-                        margin=top1_margin,
+                        gate_top1_label=smoothed_top1_label,
+                        gate_top1_prob=smoothed_top1_prob,
+                        gate_top2_label=smoothed_top2_label,
+                        gate_top2_prob=smoothed_top2_prob,
+                        gate_margin=top1_margin,
                         decision_status=decision_status,
                         decision_label=decision_label,
                         final_action_status=final_action_status,
@@ -736,11 +761,11 @@ def main() -> None:
                         decision_label=decision_label,
                         raw_label=raw_label,
                         smoothed_label=smoothed_label,
-                        top1_label=top1_label,
-                        top1_prob=top1_prob,
-                        top2_label=top2_label,
-                        top2_prob=top2_prob,
-                        margin=top1_margin,
+                        gate_top1_label=smoothed_top1_label,
+                        gate_top1_prob=smoothed_top1_prob,
+                        gate_top2_label=smoothed_top2_label,
+                        gate_top2_prob=smoothed_top2_prob,
+                        gate_margin=top1_margin,
                         current_accept_streak=current_accept_streak,
                         trigger_streak_required=args.trigger_streak,
                         current_cooldown_remaining=current_cooldown_remaining,
@@ -760,9 +785,12 @@ def main() -> None:
                     print(
                         f"{severity} frame={frame_path.name} | raw={raw_label} | smooth={smoothed_label} "
                         f"| top3: {compact_top3(raw_probs, id_to_label=id_to_label, top_k=3)} "
-                        f"| top1={top1_label}:{top1_prob:.3f} "
-                        f"top2={top2_label}:{top2_prob:.3f} "
-                        f"margin={top1_margin:.3f} "
+                        f"| raw_top1={raw_top1_label}:{raw_top1_prob:.3f} "
+                        f"raw_top2={raw_top2_label}:{raw_top2_prob:.3f} "
+                        f"raw_margin={raw_top1_margin:.3f} "
+                        f"| gate_top1={smoothed_top1_label}:{smoothed_top1_prob:.3f} "
+                        f"gate_top2={smoothed_top2_label}:{smoothed_top2_prob:.3f} "
+                        f"gate_margin={top1_margin:.3f} "
                         f"decision={decision_status}:{decision_label} "
                         f"trigger={final_action_status}:{final_action_label or '-'} "
                         f"streak={current_accept_streak}/{args.trigger_streak} "
@@ -790,10 +818,10 @@ def main() -> None:
                         "buffer_fill": f"{fill}/{SEQUENCE_LENGTH}",
                         "raw_prediction": raw_label,
                         "smoothed_prediction": smoothed_label,
-                        "top1_label": top1_label,
-                        "top1_prob": top1_prob,
-                        "top2_label": top2_label,
-                        "top2_prob": top2_prob,
+                        "top1_label": raw_top1_label,
+                        "top1_prob": raw_top1_prob,
+                        "top2_label": raw_top2_label,
+                        "top2_prob": raw_top2_prob,
                         "top3_label": id_to_label.get(int(top3[2]), f"class_{int(top3[2])}"),
                         "top3_prob": float(raw_probs[top3[2]]),
                         "had_joint_repair": int(frame_result.had_joint_repair),
@@ -808,7 +836,13 @@ def main() -> None:
                         "selected_right_person_index": frame_result.selected_right_person_index,
                         "tracking_note": frame_result.tracking_note,
                         "intended_label": intended_label,
-                        "top1_margin": top1_margin,
+                        "top1_margin": raw_top1_margin,
+                        "smoothed_top1_label": smoothed_top1_label,
+                        "smoothed_top1_prob": smoothed_top1_prob,
+                        "smoothed_top2_label": smoothed_top2_label,
+                        "smoothed_top2_prob": smoothed_top2_prob,
+                        "smoothed_top1_margin": top1_margin,
+                        "decision_source": "smoothed_probs",
                         "decision_label": decision_label,
                         "decision_status": decision_status,
                         "accept_threshold": args.accept_threshold,
