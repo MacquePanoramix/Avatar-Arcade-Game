@@ -25,6 +25,16 @@ from src.utils.paths import load_paths_config, resolve_path
 
 DEFAULT_PROPOSAL_METHOD = "motion_energy_v1"
 DEFAULT_MANIFEST_NAME = "active_gesture_ranges.csv"
+DEFAULT_CONTEXT_FRAMES = 3
+DEFAULT_ACTIVE_SAMPLES = 8
+BODY25_RENDER_EDGES = [
+    (0, 1),
+    (1, 2), (2, 3), (3, 4),
+    (1, 5), (5, 6), (6, 7),
+    (1, 8), (8, 9), (8, 12),
+    (0, 15), (15, 17),
+    (0, 16), (16, 18),
+]
 
 
 @dataclass
@@ -145,6 +155,33 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Directory for saved plots (default: logs/analysis/gesture_segment_plots).",
     )
+    parser.add_argument(
+        "--save-contact-sheets",
+        action="store_true",
+        help="Save per-take skeleton contact sheet around the proposed active range.",
+    )
+    parser.add_argument(
+        "--contact-sheet-dir",
+        type=str,
+        default=None,
+        help="Directory for saved contact sheets (default: logs/analysis/gesture_segment_contact_sheets).",
+    )
+    parser.add_argument(
+        "--show-contact-sheet-path",
+        action="store_true",
+        help="Print saved contact-sheet path while processing.",
+    )
+    parser.add_argument(
+        "--show-plot-path",
+        action="store_true",
+        help="Print saved plot path while processing.",
+    )
+    parser.add_argument(
+        "--review-mode",
+        choices=["plot", "contact_sheet", "both"],
+        default="both",
+        help="Select which review artifact(s) to generate when save flags are enabled.",
+    )
 
     return parser.parse_args()
 
@@ -255,7 +292,7 @@ def propose_segment(
     threshold_multiplier: float,
     min_active_run: int,
 ) -> tuple[SegmentProposal, np.ndarray, np.ndarray]:
-    frame_paths = sorted(p for p in take_dir.iterdir() if p.is_file() and p.suffix == ".json")[:SEQUENCE_LENGTH]
+    frame_paths = _frame_paths_for_take(take_dir)
     if not frame_paths:
         raise ValueError(f"No JSON frames found in take: {take_dir}")
 
@@ -297,6 +334,10 @@ def propose_segment(
     return proposal, motion, smoothed
 
 
+def _frame_paths_for_take(take_dir: Path) -> list[Path]:
+    return sorted(p for p in take_dir.iterdir() if p.is_file() and p.suffix == ".json")[:SEQUENCE_LENGTH]
+
+
 def _make_plot(
     take_info: TakeInfo,
     raw_motion: np.ndarray,
@@ -323,6 +364,125 @@ def _make_plot(
     plt.close()
 
 
+def _sample_contact_sheet_indices(
+    frame_count: int,
+    active_start: int,
+    active_end: int,
+    context_count: int = DEFAULT_CONTEXT_FRAMES,
+    active_count: int = DEFAULT_ACTIVE_SAMPLES,
+) -> list[tuple[int, str]]:
+    if frame_count <= 0:
+        return []
+
+    active_start = int(np.clip(active_start, 0, frame_count - 1))
+    active_end = int(np.clip(active_end, 0, frame_count - 1))
+    if active_start > active_end:
+        active_start, active_end = active_end, active_start
+
+    pre = np.arange(max(0, active_start - context_count), active_start, dtype=int)
+    post = np.arange(active_end + 1, min(frame_count, active_end + 1 + context_count), dtype=int)
+    if active_end == active_start:
+        active = np.array([active_start], dtype=int)
+    else:
+        active = np.linspace(active_start, active_end, num=max(1, active_count), dtype=int)
+
+    labeled: list[tuple[int, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for idx, region in ([*[(int(i), "PRE") for i in pre], *[(int(i), "ACTIVE") for i in active], *[(int(i), "POST") for i in post]]):
+        key = (idx, region)
+        if key in seen:
+            continue
+        seen.add(key)
+        labeled.append((idx, region))
+    return labeled
+
+
+def _load_body25_xy(frame_path: Path) -> np.ndarray:
+    payload = json.loads(frame_path.read_text(encoding="utf-8"))
+    people = payload.get("people", [])
+    if not people:
+        return np.full((25, 2), np.nan, dtype=np.float32)
+    keypoints = people[0].get("pose_keypoints_2d", [])
+    if len(keypoints) < 75:
+        return np.full((25, 2), np.nan, dtype=np.float32)
+    body25 = np.array(keypoints[:75], dtype=np.float32).reshape(25, 3)
+    xy = body25[:, :2]
+    conf = body25[:, 2]
+    xy[conf <= 0.0] = np.nan
+    return xy
+
+
+def _make_contact_sheet(
+    take_info: TakeInfo,
+    frame_paths: list[Path],
+    proposal: SegmentProposal,
+    output_path: Path,
+) -> Path | None:
+    if not frame_paths:
+        return None
+
+    samples = _sample_contact_sheet_indices(
+        frame_count=len(frame_paths),
+        active_start=proposal.active_start_frame,
+        active_end=proposal.active_end_frame,
+    )
+    if not samples:
+        return None
+
+    poses = [_load_body25_xy(frame_paths[idx]) for idx, _ in samples]
+    all_xy = np.concatenate([pose[np.isfinite(pose[:, 0]) & np.isfinite(pose[:, 1])] for pose in poses if np.any(np.isfinite(pose))], axis=0) if any(np.any(np.isfinite(pose)) for pose in poses) else np.empty((0, 2), dtype=np.float32)
+
+    if len(all_xy) > 0:
+        x_min, y_min = np.min(all_xy[:, 0]), np.min(all_xy[:, 1])
+        x_max, y_max = np.max(all_xy[:, 0]), np.max(all_xy[:, 1])
+    else:
+        x_min, y_min, x_max, y_max = 0.0, 0.0, 1.0, 1.0
+    x_pad = max(20.0, 0.10 * (x_max - x_min + 1.0))
+    y_pad = max(20.0, 0.10 * (y_max - y_min + 1.0))
+
+    cols = min(7, len(samples))
+    rows = int(np.ceil(len(samples) / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(2.8 * cols, 2.8 * rows), squeeze=False)
+    fig.suptitle(
+        f"{take_info.gesture}/{take_info.person}/{take_info.session}/{take_info.take}\n"
+        f"proposed active range: [{proposal.active_start_frame}, {proposal.active_end_frame}]",
+        fontsize=11,
+    )
+    region_colors = {"PRE": "tab:blue", "ACTIVE": "tab:green", "POST": "tab:orange"}
+
+    for slot, (frame_idx, region) in enumerate(samples):
+        r, c = divmod(slot, cols)
+        ax = axes[r][c]
+        ax.set_facecolor("#0f1115")
+        pose = poses[slot]
+        color = region_colors[region]
+
+        for a, b in BODY25_RENDER_EDGES:
+            if np.all(np.isfinite(pose[a])) and np.all(np.isfinite(pose[b])):
+                ax.plot([pose[a, 0], pose[b, 0]], [pose[a, 1], pose[b, 1]], color=color, linewidth=2.0, alpha=0.95)
+        valid = np.isfinite(pose[:, 0]) & np.isfinite(pose[:, 1])
+        if np.any(valid):
+            ax.scatter(pose[valid, 0], pose[valid, 1], s=18, c=color, edgecolors="white", linewidths=0.3)
+
+        ax.set_xlim(x_min - x_pad, x_max + x_pad)
+        ax.set_ylim(y_max + y_pad, y_min - y_pad)
+        ax.set_title(f"{region} | frame {frame_idx}", color="white", fontsize=9)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_color("#3a3f4b")
+
+    for slot in range(len(samples), rows * cols):
+        r, c = divmod(slot, cols)
+        axes[r][c].axis("off")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
 def _clamp_segment(start: int, end: int, frame_count: int) -> tuple[int, int]:
     start = int(np.clip(start, 0, frame_count - 1))
     end = int(np.clip(end, 0, frame_count - 1))
@@ -335,6 +495,8 @@ def _resolve_user_segment(
     proposal: SegmentProposal,
     frame_count: int,
     args: argparse.Namespace,
+    plot_path: Path | None = None,
+    contact_sheet_path: Path | None = None,
 ) -> tuple[int, int, str]:
     if args.start_frame is not None or args.end_frame is not None:
         if args.start_frame is None or args.end_frame is None:
@@ -345,9 +507,14 @@ def _resolve_user_segment(
     if args.accept_auto or not args.interactive:
         return proposal.active_start_frame, proposal.active_end_frame, "auto_accepted"
 
+    print("  Review artifacts for this take:")
+    if contact_sheet_path:
+        print(f"    Contact sheet: {contact_sheet_path}")
+    if plot_path:
+        print(f"    Motion plot:   {plot_path}")
     print(
         f"  Auto proposal: start={proposal.active_start_frame}, end={proposal.active_end_frame}. "
-        "Accept? [Y/n]"
+        "Inspect the contact sheet (and plot, if saved) before answering. Accept? [Y/n]"
     )
     reply = input().strip().lower()
     if reply in {"", "y", "yes"}:
@@ -412,6 +579,11 @@ def main() -> None:
     openpose_root = _resolve_openpose_root(args.openpose_root)
     manifest_path = resolve_path(args.manifest_path) if args.manifest_path else (openpose_root / DEFAULT_MANIFEST_NAME)
     plot_dir = resolve_path(args.plot_dir) if args.plot_dir else resolve_path("logs/analysis/gesture_segment_plots")
+    contact_sheet_dir = (
+        resolve_path(args.contact_sheet_dir)
+        if args.contact_sheet_dir
+        else resolve_path("logs/analysis/gesture_segment_contact_sheets")
+    )
 
     take_infos = _discover_take_infos(openpose_root, args)
     if not take_infos:
@@ -436,18 +608,41 @@ def main() -> None:
             min_active_run=args.min_active_run,
         )
         frame_count = len(smoothed_motion)
+        frame_paths = _frame_paths_for_take(take.take_dir)
+        plot_path: Path | None = None
+        contact_sheet_path: Path | None = None
 
-        if args.save_plots:
+        if args.save_plots and args.review_mode in {"plot", "both"}:
             plot_name = f"{take.gesture}__{take.person}__{take.session}__{take.take}.png"
+            plot_path = plot_dir / plot_name
             _make_plot(
                 take_info=take,
                 raw_motion=raw_motion,
                 smoothed_motion=smoothed_motion,
                 proposal=proposal,
-                output_path=plot_dir / plot_name,
+                output_path=plot_path,
             )
+            if args.show_plot_path:
+                print(f"  Saved motion plot: {plot_path}")
 
-        start, end, label_status = _resolve_user_segment(proposal, frame_count, args)
+        if args.save_contact_sheets and args.review_mode in {"contact_sheet", "both"}:
+            sheet_name = f"{take.gesture}__{take.person}__{take.session}__{take.take}.png"
+            contact_sheet_path = _make_contact_sheet(
+                take_info=take,
+                frame_paths=frame_paths,
+                proposal=proposal,
+                output_path=contact_sheet_dir / sheet_name,
+            )
+            if contact_sheet_path and args.show_contact_sheet_path:
+                print(f"  Saved contact sheet: {contact_sheet_path}")
+
+        start, end, label_status = _resolve_user_segment(
+            proposal,
+            frame_count,
+            args,
+            plot_path=plot_path,
+            contact_sheet_path=contact_sheet_path,
+        )
 
         take_abs = take.take_dir.resolve()
         try:

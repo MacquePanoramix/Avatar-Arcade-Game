@@ -892,3 +892,37 @@ It is a lower-risk next step than jumping directly into another model redesign.
 ### Current takeaway
 
 Before another major model change, improve the data description of **when** gesture activity occurs inside each take.
+
+## Active-range annotation review upgrade (OpenPose JSON skeleton contact sheets)
+
+### Problem discovered
+
+The motion-energy proposer was useful for generating candidate `active_start_frame` / `active_end_frame` labels, but practical review was still weak.
+Users could inspect motion curves, yet they still had to guess whether the proposed range truly matched the real gesture frames.
+
+### Conclusion
+
+The annotation workflow needed a human-usable frame review tool, not only motion plots.
+If reviewers cannot quickly see representative pose frames around the proposed segment, acceptance/correction decisions stay guess-based.
+
+### What changed
+
+The gesture-segment annotation tool now supports OpenPose-JSON-native skeleton contact-sheet generation:
+
+- renders BODY_25 skeleton frames onto a simple canvas,
+- includes frame indices and region tags,
+- samples frames before start, inside active span, and after end,
+- labels samples as `PRE`, `ACTIVE`, and `POST`,
+- works directly from JSON (no paired RGB video requirement).
+
+Interactive review messaging now points users to inspect the saved contact sheet (and optional motion plot) before accepting or correcting the proposal.
+
+### Why it matters
+
+This makes active-range annotation substantially more trustworthy.
+Instead of inferring timing only from a scalar motion curve, reviewers can validate whether the selected span visually captures the intended gesture body dynamics.
+That improves the defensibility of future dataset refinement decisions based on active spans.
+
+### Current takeaway
+
+Before integrating active-range labels into preprocessing, first ensure the review process is genuinely usable for humans and robust to JSON-only takes.

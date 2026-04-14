@@ -498,11 +498,11 @@ Run examples:
 # One take, accept automatic proposal
 python -m src.analysis.propose_gesture_segments \
   --take-dir data/raw/openpose_json/attack_air/luis/s01/take_001 \
-  --accept-auto --save-plots
+  --accept-auto --save-plots --save-contact-sheets --show-contact-sheet-path
 
 # One gesture folder (interactive review)
 python -m src.analysis.propose_gesture_segments \
-  --gesture attack_air --interactive --save-plots
+  --gesture attack_air --interactive --save-plots --save-contact-sheets --review-mode both
 
 # Entire dataset (skip already labeled takes unless --overwrite)
 python -m src.analysis.propose_gesture_segments --all --accept-auto
@@ -514,12 +514,25 @@ What the tool does:
 - uses the same upper-body BODY_25 joint subset used by preprocessing
 - computes per-frame motion energy from consecutive-frame joint deltas
 - smooths motion, thresholds it, and proposes first/last significant active frames
+- can save a skeleton contact sheet rendered directly from OpenPose JSON (no RGB video required)
+  - samples context before start, representative active frames, and context after end
+  - labels samples as `PRE`, `ACTIVE`, `POST` with frame indices for quick review
 - optionally prompts for manual correction (or accepts manual CLI overrides)
+
+Why this review upgrade matters:
+
+- motion curves alone are helpful but still indirect
+- the contact sheet makes the proposed frame span visually inspectable before accepting/correcting labels
+- this keeps active-range review practical even for takes that only have JSON and no paired RGB video
 
 Where labels are saved:
 
 - Central CSV manifest (default):
   - `data/raw/openpose_json/active_gesture_ranges.csv`
+- Contact sheets (default when enabled):
+  - `logs/analysis/gesture_segment_contact_sheets/`
+- Motion plots (default when enabled):
+  - `logs/analysis/gesture_segment_plots/`
 
 Each manifest row contains:
 
@@ -534,3 +547,4 @@ Notes:
 - It does **not** change model architecture.
 - It does **not** retrain automatically.
 - Future preprocessing/training integration can consume this manifest explicitly in a later task.
+- Contact-sheet review is annotation-only tooling; active-range labels are not integrated into preprocessing in this step.
