@@ -1499,8 +1499,11 @@ def main() -> None:
                     p2_label = p2_label if p2_label else "idle" # 防止空字串
                     p2_trigger = 1 if players['right']['final_action_status'] == "TRIGGER" else 0
 
+                    # time debugging
+                    current_time_ms = int(time.time() * 1000)
+
                     # 格式會變成類似: "attack_earth,1,idle,0"
-                    message = f"{p1_label},{p1_trigger},{p2_label},{p2_trigger}"
+                    message = f"{p1_label},{p1_trigger},{p2_label},{p2_trigger},{current_time_ms}"
                     sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
                     
                     if p1_trigger == 1 or p2_trigger == 1:
