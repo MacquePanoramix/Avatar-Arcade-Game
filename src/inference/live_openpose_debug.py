@@ -1056,7 +1056,7 @@ def main() -> None:
             if args.max_backlog_frames is not None and len(new_paths) > args.max_backlog_frames:
                 dropped_count = len(new_paths) - args.max_backlog_frames
                 new_paths = new_paths[-args.max_backlog_frames :]
-                print(f"skipping stale backlog: dropped {dropped_count} old frames", flush=True)
+                print(f"skipping stale backlog: dropped {dropped_count} frames", flush=True)
             for frame_path in new_paths:
                 # Mark seen first to avoid repeatedly trying a truncated file forever.
                 seen_files.add(frame_path.name)
