@@ -22,6 +22,15 @@ from typing import Any
 import numpy as np
 from tensorflow import keras
 
+# UDP socket delivery to Unity
+import socket
+
+# udp configuration
+UDP_IP = "127.0.0.1"
+UDP_PORT = 5005
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+
 from src.preprocessing.preprocess_constants import FEATURES_PER_FRAME
 from src.preprocessing.runtime_preprocess import RuntimePreprocessor
 from src.preprocessing.temporal_resampling import (
@@ -1356,6 +1365,28 @@ def main() -> None:
                             "right": players_payload.get("right", build_safe_player_payload(tracked=False, person_index=None)),
                         },
                     }
+
+                    # Prepare the message for Unity
+                    # This sends: LeftLabel,LeftStatus,RightLabel,RightStatus
+                    players = output_payload["players"]
+
+                    p1_label = players['left']['final_action_label'] if players['left']['tracked'] else "idle"
+                    p1_label = p1_label if p1_label else "idle" # 防止空字串
+                    p1_trigger = 1 if players['left']['final_action_status'] == "TRIGGER" else 0
+
+                    # 抓取右邊玩家狀態
+                    p2_label = players['right']['final_action_label'] if players['right']['tracked'] else "idle"
+                    p2_label = p2_label if p2_label else "idle" # 防止空字串
+                    p2_trigger = 1 if players['right']['final_action_status'] == "TRIGGER" else 0
+
+                    # 格式會變成類似: "attack_earth,1,idle,0"
+                    message = f"{p1_label},{p1_trigger},{p2_label},{p2_trigger}"
+                    sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
+                    
+                    if p1_trigger == 1 or p2_trigger == 1:
+                        print(f"★ [UDP 發送] 觸發魔法囉: {message}")
+
+
                     if latest_json_path is not None:
                         latest_json_path.write_text(json.dumps(output_payload, indent=2), encoding="utf-8")
                     if jsonl_path is not None:
