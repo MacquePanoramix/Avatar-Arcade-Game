@@ -100,6 +100,15 @@ def parse_args() -> argparse.Namespace:
         help="Runtime person assignment mode (default: single_person).",
     )
     parser.add_argument(
+        "--side-split-x",
+        type=float,
+        default=None,
+        help=(
+            "Optional literal vertical split line (x pixel) used only in "
+            "two_player_left_right mode. Left uses x < split; right uses x >= split."
+        ),
+    )
+    parser.add_argument(
         "--max-idle-polls",
         type=int,
         default=0,
@@ -706,6 +715,20 @@ class PlayerRuntimeState:
     fps_max_seen: float | None = None
     total_triggers: int = 0
     trigger_lock_was_off_count: int = 0
+    consecutive_untracked_frames: int = 0
+
+    def reset_temporal_state(self) -> None:
+        self.rolling.clear()
+        self.motion_flags.clear()
+        self.ema_probs = None
+        self.motion_score_smoothed = 0.0
+        self.motion_active = False
+        self.motion_on_run = 0
+        self.current_accept_streak = 0
+        self.current_accept_label = ""
+        self.current_cooldown_remaining = 0
+        self.trigger_locked = False
+        self.release_counter = 0
 
 
 def main() -> None:
@@ -765,6 +788,7 @@ def main() -> None:
     preprocessor = RuntimePreprocessor(
         confidence_cutoff=args.confidence_cutoff,
         tracking_mode=args.tracking_mode,
+        side_split_x=args.side_split_x if args.tracking_mode == "two_player_left_right" else None,
     )
 
     live_source_fps = float(args.live_source_fps)
@@ -1044,14 +1068,96 @@ def main() -> None:
                             if state.fps_max_seen is None
                             else max(state.fps_max_seen, state.estimated_live_fps)
                         )
-
-                        state.rolling.append(side_features)
-                        fill = len(state.rolling)
                         live_source_window_frames_current = source_window_frames_for_target_span(
                             target_sequence_length=TARGET_SEQUENCE_LENGTH,
                             source_nominal_fps=state.estimated_live_fps,
                             target_fps=TARGET_FPS,
                         )
+
+                        if not side_tracked:
+                            state.consecutive_untracked_frames += 1
+                            if state.consecutive_untracked_frames >= 8:
+                                state.reset_temporal_state()
+                            payload = build_safe_player_payload(tracked=False, person_index=side_person_index)
+                            payload["motion_active"] = False
+                            players_payload[side] = payload
+                            players_overlay_payload[side] = {
+                                **payload,
+                                "estimated_live_fps": state.estimated_live_fps,
+                                "classifier_input_source_mode": "untracked",
+                                "active_span_length_frames": 0,
+                            }
+                            writer.writerow(
+                                {
+                                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                                    "frame_file": frame_path.name,
+                                    "player_side": side,
+                                    "player_tracked": 0,
+                                    "buffer_fill": f"{len(state.rolling)}/{live_source_window_frames_current}",
+                                    "raw_prediction": "idle",
+                                    "smoothed_prediction": "idle",
+                                    "top1_label": "idle",
+                                    "top1_prob": 0.0,
+                                    "top2_label": "",
+                                    "top2_prob": "",
+                                    "top3_label": "",
+                                    "top3_prob": "",
+                                    "had_joint_repair": int(frame_result.had_joint_repair),
+                                    "repaired_frame": int(frame_result.was_repaired_frame),
+                                    "used_prev_frame_copy": int(frame_result.used_prev_frame_copy),
+                                    "suspicious_jump": int(frame_result.suspicious_jump),
+                                    "missing_joint_count": missing_joints,
+                                    "detected_people_count": frame_result.detected_people_count,
+                                    "tracking_mode": frame_result.tracking_mode,
+                                    "selected_person_index": frame_result.selected_person_index,
+                                    "selected_left_person_index": frame_result.selected_left_person_index,
+                                    "selected_right_person_index": frame_result.selected_right_person_index,
+                                    "tracking_note": frame_result.tracking_note,
+                                    "intended_label": intended_label,
+                                    "top1_margin": 0.0,
+                                    "smoothed_top1_label": "idle",
+                                    "smoothed_top1_prob": 0.0,
+                                    "smoothed_top2_label": "",
+                                    "smoothed_top2_prob": "",
+                                    "smoothed_top1_margin": 0.0,
+                                    "decision_source": "untracked",
+                                    "decision_label": "NO_ACTION",
+                                    "decision_status": "NO_ACTION",
+                                    "accept_threshold": args.accept_threshold,
+                                    "margin_threshold": args.margin_threshold,
+                                    "trigger_streak_required": args.trigger_streak,
+                                    "current_accept_streak": 0,
+                                    "trigger_cooldown_frames": args.trigger_cooldown_frames,
+                                    "current_cooldown_remaining": 0,
+                                    "final_action_status": "NO_TRIGGER",
+                                    "final_action_label": "",
+                                    "trigger_locked": 0,
+                                    "release_counter": 0,
+                                    "reset_counter": state.consecutive_untracked_frames,
+                                    "trigger_lock_was_off": "",
+                                    "overlay_mode": effective_overlay_mode,
+                                    "release_idle_frames": args.release_idle_frames,
+                                    "auto_live_fps_enabled": int(args.auto_live_fps),
+                                    "estimated_live_fps": state.estimated_live_fps,
+                                    "instantaneous_live_fps": "" if state.instantaneous_live_fps is None else state.instantaneous_live_fps,
+                                    "live_source_fps": live_source_fps,
+                                    "live_source_window_frames": max_source_window_frames,
+                                    "live_source_window_frames_current": live_source_window_frames_current,
+                                    "motion_score_raw": 0.0,
+                                    "motion_score_smoothed": 0.0,
+                                    "motion_active": 0,
+                                    "active_span_start_index": "",
+                                    "active_span_end_index": "",
+                                    "active_span_length_frames": 0,
+                                    "classifier_input_source_mode": "untracked",
+                                }
+                            )
+                            continue
+
+                        state.consecutive_untracked_frames = 0
+
+                        state.rolling.append(side_features)
+                        fill = len(state.rolling)
                         prev_features = state.rolling[-2] if len(state.rolling) >= 2 else state.rolling[-1]
                         motion_score_raw = float(np.mean(np.abs(state.rolling[-1] - prev_features)))
                         state.motion_score_smoothed = (
