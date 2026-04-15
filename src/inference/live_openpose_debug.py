@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 import time
 from collections import Counter, deque
 from dataclasses import dataclass, field
@@ -50,6 +51,14 @@ except ImportError:  # pragma: no cover - optional dependency
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Live OpenPose JSON debug classifier (pose-only MLP).")
+    parser.add_argument(
+        "--demo-responsive",
+        action="store_true",
+        help=(
+            "Enable demo-friendly defaults for easier triggering and lower latency. "
+            "Explicitly provided CLI values still take precedence."
+        ),
+    )
     parser.add_argument(
         "--json-dir",
         type=str,
@@ -113,6 +122,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Optional exit after N consecutive polls with no new frames (0 = never exit).",
+    )
+    parser.add_argument(
+        "--max-backlog-frames",
+        type=int,
+        default=None,
+        help=(
+            "Optional live backlog cap. When pending unseen JSON frames exceed this count, "
+            "older frames are dropped and only the newest frames are processed."
+        ),
     )
     parser.add_argument(
         "--print-every-n",
@@ -276,6 +294,33 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to append per-frame prediction JSON objects (JSONL).",
     )
     return parser.parse_args()
+
+
+def _cli_flag_present(flag_name: str, argv: list[str]) -> bool:
+    return any(arg == flag_name or arg.startswith(f"{flag_name}=") for arg in argv)
+
+
+def apply_demo_responsive_defaults(args: argparse.Namespace, argv: list[str]) -> list[str]:
+    if not args.demo_responsive:
+        return []
+
+    demo_defaults: dict[str, tuple[str, Any]] = {
+        "accept_threshold": ("--accept-threshold", 0.55),
+        "margin_threshold": ("--margin-threshold", 0.02),
+        "trigger_streak": ("--trigger-streak", 1),
+        "trigger_cooldown_frames": ("--trigger-cooldown-frames", 5),
+        "release_idle_frames": ("--release-idle-frames", 1),
+        "motion_on_min_consecutive": ("--motion-on-min-consecutive", 1),
+        "active_span_min_frames": ("--active-span-min-frames", 2),
+        "max_backlog_frames": ("--max-backlog-frames", 1),
+    }
+    applied: list[str] = []
+    for attr_name, (flag_name, default_value) in demo_defaults.items():
+        if _cli_flag_present(flag_name, argv):
+            continue
+        setattr(args, attr_name, default_value)
+        applied.append(f"{flag_name}={default_value}")
+    return applied
 
 
 def load_label_map(path: Path) -> dict[int, str]:
@@ -732,6 +777,7 @@ class PlayerRuntimeState:
 
 def main() -> None:
     args = parse_args()
+    demo_defaults_applied = apply_demo_responsive_defaults(args, sys.argv[1:])
     overlay_mode = normalize_overlay_mode(args)
     if args.accept_threshold < 0 or args.accept_threshold > 1:
         raise ValueError("--accept-threshold must be in [0, 1].")
@@ -761,6 +807,8 @@ def main() -> None:
         raise ValueError("--active-span-min-frames must be >= 1.")
     if args.active_span_context_before_sec < 0 or args.active_span_context_after_sec < 0:
         raise ValueError("--active-span-context-before-sec/after-sec must be >= 0.")
+    if args.max_backlog_frames is not None and args.max_backlog_frames < 1:
+        raise ValueError("--max-backlog-frames must be >= 1 when provided.")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -917,6 +965,17 @@ def main() -> None:
     print(f"Latest JSON output: {latest_json_path if latest_json_path is not None else '(disabled)'}")
     print(f"JSONL output: {jsonl_path if jsonl_path is not None else '(disabled)'}")
     print(f"Tracking mode: {args.tracking_mode}")
+    print(f"Demo responsive preset: {'ON' if args.demo_responsive else 'OFF'}")
+    if demo_defaults_applied:
+        print(f"Applied demo defaults (not explicitly overridden): {', '.join(demo_defaults_applied)}")
+    print(
+        "Backlog policy: "
+        + (
+            f"skip stale backlog when pending unseen frames > {args.max_backlog_frames}."
+            if args.max_backlog_frames is not None
+            else "process every unseen frame (no stale backlog skipping)."
+        )
+    )
     effective_overlay_mode = overlay_mode
     if overlay_mode in {"window", "both"} and cv2 is None:
         print("WARNING: OpenCV (cv2) not found; window HUD disabled.")
@@ -994,6 +1053,10 @@ def main() -> None:
                 continue
 
             idle_polls = 0
+            if args.max_backlog_frames is not None and len(new_paths) > args.max_backlog_frames:
+                dropped_count = len(new_paths) - args.max_backlog_frames
+                new_paths = new_paths[-args.max_backlog_frames :]
+                print(f"skipping stale backlog: dropped {dropped_count} old frames", flush=True)
             for frame_path in new_paths:
                 # Mark seen first to avoid repeatedly trying a truncated file forever.
                 seen_files.add(frame_path.name)

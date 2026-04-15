@@ -1140,3 +1140,26 @@ Why it matters:
 Takeaway:
 
 - Live temporal behavior should be tied to frame arrival timing, not duplicated per-branch processing cost.
+
+## Final demo responsiveness pass: easier triggering + stale-backlog skipping
+
+What was observed:
+
+- During live testing, strict gating and occasional backlog buildup could make the system feel frozen or delayed.
+
+What was concluded:
+
+- For a live interactive demo, freshness matters more than faithfully processing stale frames.
+
+What changed:
+
+- Optional demo-responsive settings make triggering easier.
+- Optional backlog skipping keeps the system focused on the newest frames.
+
+Why it matters:
+
+- The demo becomes more reactive and less likely to visibly lag behind the players.
+
+Takeaway:
+
+- For live game use, responsiveness and recency are more important than processing every historical frame.
