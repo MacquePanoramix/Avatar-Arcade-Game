@@ -132,6 +132,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--newest-frame-only",
+        action="store_true",
+        help=(
+            "Optional live/demo mode: process only the newest stable unseen frame per poll and "
+            "intentionally drop older unseen frames."
+        ),
+    )
+    parser.add_argument(
         "--cleanup-processed-json",
         action="store_true",
         help=(
@@ -914,6 +922,7 @@ def main() -> None:
     max_seen_files = max(2048, rolling_capacity * 32)
     processed_files_queue: deque[Path] = deque()
     deleted_processed_json_count = 0
+    newest_frame_only_dropped_count = 0
     print_every_n = max(1, int(args.print_every_n))
     summary_path = summary_path_from_csv(log_csv_path) if log_csv_path is not None else None
     latest_json_path = Path(args.output_latest_json).expanduser().resolve() if args.output_latest_json else None
@@ -1006,6 +1015,14 @@ def main() -> None:
         if csv_file is not None:
             csv_file.flush()
 
+    def register_seen_frame(frame_path: Path) -> None:
+        seen_name = frame_path.name
+        seen_files.add(seen_name)
+        seen_files_queue.append(seen_name)
+        while len(seen_files_queue) > max_seen_files:
+            old_seen = seen_files_queue.popleft()
+            seen_files.discard(old_seen)
+
     def cleanup_processed_json(current_frame_path: Path) -> int:
         if not args.cleanup_processed_json:
             return 0
@@ -1041,11 +1058,21 @@ def main() -> None:
     print(
         "Backlog policy: "
         + (
-            f"skip stale backlog when pending unseen frames > {args.max_backlog_frames}."
-            if args.max_backlog_frames is not None
-            else "process every unseen frame (no stale backlog skipping)."
+            "newest-frame-only mode: process only the newest stable unseen frame per poll; "
+            "older unseen frames are intentionally dropped."
+            if args.newest_frame_only
+            else (
+                f"skip stale backlog when pending unseen frames > {args.max_backlog_frames}."
+                if args.max_backlog_frames is not None
+                else "process every unseen frame (no stale backlog skipping)."
+            )
         )
     )
+    if args.newest_frame_only and args.max_backlog_frames is not None:
+        print(
+            "NOTE: --newest-frame-only is enabled; --max-backlog-frames is ignored in this mode.",
+            flush=True,
+        )
     print(
         "Processed JSON cleanup: "
         + (
@@ -1131,25 +1158,47 @@ def main() -> None:
                 time.sleep(args.poll_interval)
                 continue
 
+            prefetched_frame_results: dict[str, Any] = {}
             idle_polls = 0
-            if args.max_backlog_frames is not None and len(new_paths) > args.max_backlog_frames:
+            if args.newest_frame_only:
+                selected_idx: int | None = None
+                for idx in range(len(new_paths) - 1, -1, -1):
+                    candidate_path = new_paths[idx]
+                    try:
+                        prefetched_frame_results[candidate_path.name] = preprocessor.process_json_path(candidate_path)
+                    except json.JSONDecodeError:
+                        continue
+                    selected_idx = idx
+                    break
+                if selected_idx is None:
+                    time.sleep(args.poll_interval)
+                    continue
+                dropped_count = selected_idx
+                if dropped_count > 0:
+                    newest_frame_only_dropped_count += dropped_count
+                    print(
+                        f"newest-frame-only: dropped {dropped_count} stale unseen frames",
+                        flush=True,
+                    )
+                    for dropped_path in new_paths[:selected_idx]:
+                        register_seen_frame(dropped_path)
+                        deleted_processed_json_count += cleanup_processed_json(dropped_path)
+                new_paths = [new_paths[selected_idx]]
+            elif args.max_backlog_frames is not None and len(new_paths) > args.max_backlog_frames:
                 dropped_count = len(new_paths) - args.max_backlog_frames
                 new_paths = new_paths[-args.max_backlog_frames :]
                 print(f"skipping stale backlog: dropped {dropped_count} frames", flush=True)
             for frame_path in new_paths:
                 # Mark seen first to avoid repeatedly trying a truncated file forever.
-                seen_name = frame_path.name
-                seen_files.add(seen_name)
-                seen_files_queue.append(seen_name)
-                while len(seen_files_queue) > max_seen_files:
-                    old_seen = seen_files_queue.popleft()
-                    seen_files.discard(old_seen)
+                register_seen_frame(frame_path)
 
-                try:
-                    frame_result = preprocessor.process_json_path(frame_path)
-                except json.JSONDecodeError:
-                    # OpenPose may still be writing this file; skip safely.
-                    continue
+                frame_result = prefetched_frame_results.get(frame_path.name)
+                if frame_result is None:
+                    try:
+                        frame_result = preprocessor.process_json_path(frame_path)
+                    except json.JSONDecodeError:
+                        # OpenPose may still be writing this file; skip safely.
+                        continue
                 deleted_processed_json_count += cleanup_processed_json(frame_path)
 
                 total_frames += 1
@@ -2119,7 +2168,10 @@ def main() -> None:
                         },
                     }
                     if latest_json_path is not None:
-                        latest_json_path.write_text(json.dumps(output_payload, indent=2), encoding="utf-8")
+                        latest_json_path.write_text(
+                            json.dumps(output_payload, separators=(",", ":")),
+                            encoding="utf-8",
+                        )
                     if jsonl_file is not None:
                         jsonl_file.write(json.dumps(output_payload) + "\n")
                         jsonl_file.flush()
@@ -2209,6 +2261,8 @@ def main() -> None:
             "cleanup_processed_json_enabled": bool(args.cleanup_processed_json),
             "keep_last_json": args.keep_last_json,
             "processed_json_deleted_count": deleted_processed_json_count,
+            "newest_frame_only_enabled": bool(args.newest_frame_only),
+            "newest_frame_only_dropped_unseen_frames": newest_frame_only_dropped_count,
         }
         if summary_path is not None:
             summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
