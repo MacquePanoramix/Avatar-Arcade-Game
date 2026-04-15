@@ -1222,3 +1222,21 @@ Why it matters:
 
 Takeaway:
 - For demos and gameplay, “current” is more valuable than “complete”.
+
+## Replacing hard split with leftmost-rightmost two-player assignment
+
+What was observed:
+- The hard split could leave LEFT untracked even when 2 people were clearly detected.
+
+What was concluded:
+- The split-line rule was the wrong abstraction; side assignment should come from relative horizontal ordering.
+
+What changed:
+- In two-player mode, left/right are now assigned by leftmost/rightmost candidate ordering.
+- Temporal continuity is still used to stabilize identity.
+
+Why it matters:
+- Both players can now be tracked more robustly even if they stand near the middle.
+
+Takeaway:
+- Side assignment should follow actual detected ordering, not a brittle fixed split line.
