@@ -6,28 +6,28 @@ set "OPENPOSE_DIR=D:\Programs\OpenPose\openpose"
 set "MODEL_PATH=D:\Documentos\Python Projects\Avatar-Arcade-Game\models\checkpoints\best_mlp.keras"
 set "OPENPOSE_MODEL_DIR=D:\Programs\OpenPose\openpose\models"
 
-for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TIMESTAMP=%%i"
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%i"
 
-set "LIVE_SESSION_DIR=%REPO_DIR%\data\raw\live_buffer\openpose_session\live_test_%TIMESTAMP%"
-set "JSON_OUT=%REPO_DIR%\logs\inference\latest_prediction_%TIMESTAMP%.json"
-set "JSONL_OUT=%REPO_DIR%\logs\inference\prediction_stream_%TIMESTAMP%.jsonl"
-set "CSV_OUT=%REPO_DIR%\logs\inference\live_test_%TIMESTAMP%.csv"
+set "FOLDER=%REPO_DIR%\data\raw\live_buffer\openpose_session\live_test_%TS%"
+set "JSON_OUT=%REPO_DIR%\logs\inference\latest_prediction_%TS%.json"
+set "JSONL_OUT=%REPO_DIR%\logs\inference\prediction_stream_%TS%.jsonl"
+set "CSV_OUT=%REPO_DIR%\logs\inference\live_test_%TS%.csv"
 
 if not exist "%REPO_DIR%\data\raw\live_buffer\openpose_session" mkdir "%REPO_DIR%\data\raw\live_buffer\openpose_session"
 if not exist "%REPO_DIR%\logs\inference" mkdir "%REPO_DIR%\logs\inference"
-if not exist "%LIVE_SESSION_DIR%" mkdir "%LIVE_SESSION_DIR%"
+if not exist "%FOLDER%" mkdir "%FOLDER%"
 
 echo ==============================================
 echo Avatar Arcade Live Demo (Single Player)
-echo Timestamp: %TIMESTAMP%
-echo Live session folder: %LIVE_SESSION_DIR%
+echo Timestamp: %TS%
+echo OpenPose JSON folder: %FOLDER%
 echo Latest JSON output: %JSON_OUT%
 echo JSONL stream output: %JSONL_OUT%
 echo CSV log output: %CSV_OUT%
 echo ==============================================
 
-start "OpenPose Live (Single Player)" cmd /k "cd /d \"%OPENPOSE_DIR%\\bin\" && OpenPoseDemo.exe --model_folder \"%OPENPOSE_MODEL_DIR%\" --write_json \"%LIVE_SESSION_DIR%\" --display 1 --render_pose 1"
+start "OpenPose Live (Single Player)" cmd /k "cd /d \"%OPENPOSE_DIR%\" ^&^& .\bin\OpenPoseDemo.exe --write_json \"%FOLDER%\" --model_folder \"%OPENPOSE_MODEL_DIR%\" --display 1 --render_pose 1"
 
-start "Classifier Live (Single Player)" cmd /k "cd /d \"%REPO_DIR%\" && python -m src.inference.live_openpose_debug --json-dir \"%LIVE_SESSION_DIR%\" --model-path \"%MODEL_PATH%\" --output-latest-json \"%JSON_OUT%\" --output-jsonl \"%JSONL_OUT%\" --log-csv \"%CSV_OUT%\" --tracking-mode single_person --overlay-mode both --live-source-fps 12 --require-motion-for-nonidle --accept-threshold 0.60 --margin-threshold 0.05 --trigger-streak 2 --trigger-cooldown-frames 8 --release-idle-frames 2 --motion-on-min-consecutive 1 --active-span-min-frames 3"
+start "Classifier Live (Single Player)" cmd /k "cd /d \"%REPO_DIR%\" ^&^& python -m src.inference.live_openpose_debug --json-dir \"%FOLDER%\" --model-path \"%MODEL_PATH%\" --tracking-mode single_person --overlay-mode both --live-source-fps 12 --require-motion-for-nonidle --accept-threshold 0.60 --margin-threshold 0.05 --trigger-streak 2 --trigger-cooldown-frames 8 --release-idle-frames 2 --motion-on-min-consecutive 1 --active-span-min-frames 3 --output-latest-json \"%JSON_OUT%\" --output-jsonl \"%JSONL_OUT%\" --log-csv \"%CSV_OUT%\" --max-idle-polls 0"
 
 endlocal
