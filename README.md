@@ -107,6 +107,28 @@ What the launcher does:
 - optional automatic cleanup is opt-in only via `-KillOpenPoseOnExit`
 - supports safer startup timing via `-OpenPoseStartupTimeoutSec 60` (default) or `-OpenPoseStartupTimeoutSec 0` to wait indefinitely
 
+### Machine-specific Windows BAT launchers (double-click live demo)
+
+For quick local startup on one specific Windows machine, use these BAT files under `scripts/windows/`:
+
+- `run_single_player_live_demo.bat`: single-player live classifier tuning (`tracking-mode single_person`).
+- `run_two_player_live_demo.bat`: two-player left/right split tuned for a 640px-wide camera with split at `x=320`.
+- `run_two_player_live_demo_left_bias.bat`: fallback two-player split with a left-biased divider at `x=380` if left-player tracking is unreliable.
+
+These launchers are **machine-specific** and currently hardcode local paths for:
+
+- repo root
+- OpenPose install
+- OpenPose model folder
+- best checkpoint model path
+
+Each launcher run creates timestamped outputs:
+
+- `data/raw/live_buffer/openpose_session/live_test_<timestamp>/`
+- `logs/inference/latest_prediction_<timestamp>.json`
+- `logs/inference/prediction_stream_<timestamp>.jsonl`
+- `logs/inference/live_test_<timestamp>.csv`
+
 ## Safer manual live-recording workflow (fresh folder per run)
 
 To avoid stale JSON contamination between runs, do **not** reuse one shared folder like `live_test` for repeated manual recordings.
