@@ -1114,3 +1114,29 @@ Why it matters:
 Takeaway:
 
 - For the presentation, simple hard partitioning is the most robust approach.
+
+## Shared frame-stream FPS correction for two-player live timing
+
+What was observed:
+
+- In two-player mode, each side's `estimated_live_fps` could drift much lower than the OpenPose window FPS.
+- This created unrealistic per-side HUD FPS values even when incoming OpenPose JSON cadence remained higher.
+
+What was concluded:
+
+- Live FPS estimation in two-player mode was effectively being influenced by per-side branch processing cadence.
+- That meant FPS could reflect duplicated branch timing cost instead of true incoming frame timing.
+
+What changed:
+
+- Live FPS is now estimated once per processed incoming frame (per processed JSON frame result).
+- The resulting shared FPS estimate is then applied to both left and right runtime states.
+
+Why it matters:
+
+- Temporal source-window sizing now tracks the true OpenPose frame stream more faithfully.
+- Both players now use the same consistent timing basis for active-span context sizing and live HUD/outputs.
+
+Takeaway:
+
+- Live temporal behavior should be tied to frame arrival timing, not duplicated per-branch processing cost.
