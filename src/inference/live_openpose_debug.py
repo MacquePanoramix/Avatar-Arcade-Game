@@ -690,7 +690,6 @@ class PlayerRuntimeState:
     motion_flags: deque[bool]
     ema_probs: np.ndarray | None = None
     estimated_live_fps: float = 0.0
-    prev_frame_ts: float | None = None
     instantaneous_live_fps: float | None = None
     motion_score_smoothed: float = 0.0
     motion_active: bool = False
@@ -805,9 +804,9 @@ def main() -> None:
     rolling: deque[np.ndarray] = deque(maxlen=rolling_capacity)
     motion_flags: deque[bool] = deque(maxlen=rolling_capacity)
     ema_probs: np.ndarray | None = None
-    estimated_live_fps = live_source_fps
-    prev_frame_ts: float | None = None
-    instantaneous_live_fps: float | None = None
+    shared_estimated_live_fps = live_source_fps
+    shared_prev_frame_ts: float | None = None
+    shared_instantaneous_live_fps: float | None = None
     fps_sum = 0.0
     fps_count = 0
     fps_min_seen: float | None = None
@@ -1021,6 +1020,33 @@ def main() -> None:
                 if frame_result.suspicious_jump:
                     suspicious_frames += 1
 
+                now_ts = time.perf_counter()
+                if args.auto_live_fps:
+                    shared_estimated_live_fps, shared_instantaneous_live_fps = update_estimated_live_fps(
+                        now_ts=now_ts,
+                        prev_ts=shared_prev_frame_ts,
+                        prev_fps=shared_estimated_live_fps,
+                        ema_alpha=float(args.fps_ema_alpha),
+                        min_fps=float(args.min_live_fps),
+                        max_fps=float(args.max_live_fps),
+                    )
+                else:
+                    shared_instantaneous_live_fps = None
+                    shared_estimated_live_fps = live_source_fps
+                shared_prev_frame_ts = now_ts
+                fps_sum += shared_estimated_live_fps
+                fps_count += 1
+                fps_min_seen = (
+                    shared_estimated_live_fps
+                    if fps_min_seen is None
+                    else min(fps_min_seen, shared_estimated_live_fps)
+                )
+                fps_max_seen = (
+                    shared_estimated_live_fps
+                    if fps_max_seen is None
+                    else max(fps_max_seen, shared_estimated_live_fps)
+                )
+
                 if args.tracking_mode == "two_player_left_right":
                     side_candidates: dict[str, tuple[np.ndarray, bool, int | None]] = {
                         "left": (
@@ -1042,20 +1068,8 @@ def main() -> None:
                     players_overlay_payload: dict[str, dict[str, Any]] = {}
                     for side, (side_features, side_tracked, side_person_index) in side_candidates.items():
                         state = player_states[side]
-                        now_ts = time.perf_counter()
-                        if args.auto_live_fps:
-                            state.estimated_live_fps, state.instantaneous_live_fps = update_estimated_live_fps(
-                                now_ts=now_ts,
-                                prev_ts=state.prev_frame_ts,
-                                prev_fps=state.estimated_live_fps,
-                                ema_alpha=float(args.fps_ema_alpha),
-                                min_fps=float(args.min_live_fps),
-                                max_fps=float(args.max_live_fps),
-                            )
-                        else:
-                            state.instantaneous_live_fps = None
-                            state.estimated_live_fps = live_source_fps
-                        state.prev_frame_ts = now_ts
+                        state.estimated_live_fps = shared_estimated_live_fps
+                        state.instantaneous_live_fps = shared_instantaneous_live_fps
                         state.fps_sum += state.estimated_live_fps
                         state.fps_count += 1
                         state.fps_min_seen = (
@@ -1500,24 +1514,8 @@ def main() -> None:
                             jsonl_file.write(json.dumps(output_payload) + "\n")
                     continue
 
-                now_ts = time.perf_counter()
-                if args.auto_live_fps:
-                    estimated_live_fps, instantaneous_live_fps = update_estimated_live_fps(
-                        now_ts=now_ts,
-                        prev_ts=prev_frame_ts,
-                        prev_fps=estimated_live_fps,
-                        ema_alpha=float(args.fps_ema_alpha),
-                        min_fps=float(args.min_live_fps),
-                        max_fps=float(args.max_live_fps),
-                    )
-                else:
-                    instantaneous_live_fps = None
-                    estimated_live_fps = live_source_fps
-                prev_frame_ts = now_ts
-                fps_sum += estimated_live_fps
-                fps_count += 1
-                fps_min_seen = estimated_live_fps if fps_min_seen is None else min(fps_min_seen, estimated_live_fps)
-                fps_max_seen = estimated_live_fps if fps_max_seen is None else max(fps_max_seen, estimated_live_fps)
+                estimated_live_fps = shared_estimated_live_fps
+                instantaneous_live_fps = shared_instantaneous_live_fps
 
                 rolling.append(frame_result.features_30)
                 fill = len(rolling)
