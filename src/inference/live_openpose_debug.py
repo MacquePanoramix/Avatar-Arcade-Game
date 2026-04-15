@@ -132,6 +132,23 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--cleanup-processed-json",
+        action="store_true",
+        help=(
+            "Optional live/demo cleanup. Delete already-processed OpenPose JSON frames "
+            "to keep the session folder from growing indefinitely."
+        ),
+    )
+    parser.add_argument(
+        "--keep-last-json",
+        type=int,
+        default=None,
+        help=(
+            "Optional safety tail when --cleanup-processed-json is enabled. "
+            "Keeps the newest N processed JSON frames on disk for debugging."
+        ),
+    )
+    parser.add_argument(
         "--print-every-n",
         type=int,
         default=1,
@@ -823,6 +840,8 @@ def main() -> None:
         raise ValueError("--active-span-context-before-sec/after-sec must be >= 0.")
     if args.max_backlog_frames is not None and args.max_backlog_frames < 1:
         raise ValueError("--max-backlog-frames must be >= 1 when provided.")
+    if args.keep_last_json is not None and args.keep_last_json < 0:
+        raise ValueError("--keep-last-json must be >= 0 when provided.")
 
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
@@ -893,6 +912,8 @@ def main() -> None:
     seen_files: set[str] = set()
     seen_files_queue: deque[str] = deque()
     max_seen_files = max(2048, rolling_capacity * 32)
+    processed_files_queue: deque[Path] = deque()
+    deleted_processed_json_count = 0
     print_every_n = max(1, int(args.print_every_n))
     summary_path = summary_path_from_csv(log_csv_path) if log_csv_path is not None else None
     latest_json_path = Path(args.output_latest_json).expanduser().resolve() if args.output_latest_json else None
@@ -985,6 +1006,26 @@ def main() -> None:
         if csv_file is not None:
             csv_file.flush()
 
+    def cleanup_processed_json(current_frame_path: Path) -> int:
+        if not args.cleanup_processed_json:
+            return 0
+        processed_files_queue.append(current_frame_path)
+        keep_last = 0 if args.keep_last_json is None else int(args.keep_last_json)
+        deleted_count = 0
+        while len(processed_files_queue) > keep_last:
+            candidate = processed_files_queue[0]
+            if candidate == current_frame_path:
+                break
+            processed_files_queue.popleft()
+            try:
+                candidate.unlink()
+                deleted_count += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                continue
+        return deleted_count
+
     print("=== Live OpenPose Debug Classifier ===")
     print(f"JSON dir: {json_dir}")
     print(f"Model: {model_path}")
@@ -1003,6 +1044,14 @@ def main() -> None:
             f"skip stale backlog when pending unseen frames > {args.max_backlog_frames}."
             if args.max_backlog_frames is not None
             else "process every unseen frame (no stale backlog skipping)."
+        )
+    )
+    print(
+        "Processed JSON cleanup: "
+        + (
+            f"ENABLED (keep_last_json={args.keep_last_json if args.keep_last_json is not None else 0})."
+            if args.cleanup_processed_json
+            else "DISABLED."
         )
     )
     effective_overlay_mode = overlay_mode
@@ -1101,6 +1150,7 @@ def main() -> None:
                 except json.JSONDecodeError:
                     # OpenPose may still be writing this file; skip safely.
                     continue
+                deleted_processed_json_count += cleanup_processed_json(frame_path)
 
                 total_frames += 1
                 missing_joints = int(frame_result.missing_joint_count)
@@ -2156,6 +2206,9 @@ def main() -> None:
             "active_span_context_before_sec": float(args.active_span_context_before_sec),
             "active_span_context_after_sec": float(args.active_span_context_after_sec),
             "players": per_player_summary,
+            "cleanup_processed_json_enabled": bool(args.cleanup_processed_json),
+            "keep_last_json": args.keep_last_json,
+            "processed_json_deleted_count": deleted_processed_json_count,
         }
         if summary_path is not None:
             summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
