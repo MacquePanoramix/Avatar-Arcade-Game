@@ -17,6 +17,8 @@ param(
     [ValidateSet("terminal", "none")]
     [string]$OverlayMode = "terminal",
 
+    [double]$SideSplitX = [double]::NaN,
+
     [switch]$KeepJson,
 
     [ValidateRange(0, 600)]
@@ -211,6 +213,34 @@ $classifierArgs = @(
     "--print-every-n", "$PrintEveryN",
     "--log-csv", $logCsvPath
 )
+
+if ($TrackingMode -eq "two_player_left_right") {
+    $resolvedSideSplitX = $null
+    if (-not [double]::IsNaN($SideSplitX)) {
+        $resolvedSideSplitX = $SideSplitX
+        Write-Host ("Using explicit side split x: {0}" -f $resolvedSideSplitX) -ForegroundColor Cyan
+    }
+    else {
+        $cameraSelector = "0"
+        if ($null -ne $config.openpose_camera -and "$($config.openpose_camera)" -ne "") {
+            $cameraSelector = "$($config.openpose_camera)"
+        }
+        $cameraProbeJson = python -c "import cv2, json, sys; cam = cv2.VideoCapture(sys.argv[1]); width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH)); height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT)); cam.release(); print(json.dumps({'width': width, 'height': height}))" "$cameraSelector"
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($cameraProbeJson)) {
+            $cameraProbe = $cameraProbeJson | ConvertFrom-Json
+            if ($cameraProbe.width -gt 0) {
+                $resolvedSideSplitX = [double]$cameraProbe.width / 2.0
+                Write-Host ("Auto side split x from camera width {0}: {1}" -f $cameraProbe.width, $resolvedSideSplitX) -ForegroundColor Cyan
+            }
+        }
+        if ($null -eq $resolvedSideSplitX) {
+            Write-Host "Warning: unable to auto-detect camera width; classifier will use dynamic split midpoint." -ForegroundColor Yellow
+        }
+    }
+    if ($null -ne $resolvedSideSplitX) {
+        $classifierArgs += @("--side-split-x", "$resolvedSideSplitX")
+    }
+}
 if (-not $NoQuietWarmup) {
     $classifierArgs += "--quiet-warmup"
 }
