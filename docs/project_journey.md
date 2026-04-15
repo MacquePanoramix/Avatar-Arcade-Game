@@ -1089,3 +1089,28 @@ Current takeaway:
 
 - The strongest improvements came not from endlessly changing the model architecture, but from fixing data quality, temporal representation, train/live consistency, and runtime integration details.
 - The final result is a working applied pipeline, not only an offline ML experiment.
+
+## Final presentation-time simplification: hard left/right screen partition
+
+What we observed:
+
+- The earlier two-player tracking/output worked structurally, but classification quality dropped compared with single-player.
+
+What conclusion we reached:
+
+- The presentation setup benefits more from strict side partitioning than from softer multi-person identity logic.
+
+What changed:
+
+- The frame is now partitioned by a literal vertical split line.
+- Each side independently selects only the highest-priority person on that side.
+- Each side then runs the same single-person-style pipeline.
+- Untracked sides no longer continue classification from fallback noise.
+
+Why it matters:
+
+- This makes the two-player behavior much closer to “two copies of the working single-player system”.
+
+Takeaway:
+
+- For the presentation, simple hard partitioning is the most robust approach.

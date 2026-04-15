@@ -108,11 +108,13 @@ class RuntimePreprocessor:
         self,
         confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
         tracking_mode: TrackingMode = "single_person",
+        side_split_x: float | None = None,
     ) -> None:
         self.confidence_cutoff = float(confidence_cutoff)
         if tracking_mode not in {"single_person", "two_player_left_right"}:
             raise ValueError(f"Unsupported tracking mode: {tracking_mode}")
         self.tracking_mode: TrackingMode = tracking_mode
+        self.side_split_x = float(side_split_x) if side_split_x is not None else None
         self.counterpart_map = self._build_symmetric_counterpart_map()
 
         self.single_feature_state = RuntimeFeatureState()
@@ -287,55 +289,18 @@ class RuntimePreprocessor:
         centered = [c for c in candidates if c.center is not None]
         if not centered:
             return None, None, "no_center_candidates"
+        split_x = self.side_split_x
+        if split_x is None:
+            min_x = min(float(c.center[0]) for c in centered)
+            max_x = max(float(c.center[0]) for c in centered)
+            split_x = 0.5 * (min_x + max_x)
 
-        left_unset = self.left_track.center is None
-        right_unset = self.right_track.center is None
-        if left_unset and right_unset:
-            best_two = sorted(centered, key=self._candidate_quality_score, reverse=True)[:2]
-            best_two = sorted(best_two, key=lambda c: float(c.center[0]))
-            if len(best_two) == 1:
-                return best_two[0], None, "two_player_init_single_seen"
-            return best_two[0], best_two[1], "two_player_init_x_order"
+        left_pool = [c for c in centered if float(c.center[0]) < float(split_x)]
+        right_pool = [c for c in centered if float(c.center[0]) >= float(split_x)]
 
-        best_left: ParsedPersonCandidate | None = None
-        best_right: ParsedPersonCandidate | None = None
-        best_score = float("inf")
-        missing_penalty = 1.5
-        cross_penalty = 0.25
-
-        options: list[tuple[int | None, int | None]] = [(None, None)]
-        for idx in range(len(centered)):
-            options.append((idx, None))
-            options.append((None, idx))
-        for left_idx in range(len(centered)):
-            for right_idx in range(len(centered)):
-                if left_idx == right_idx:
-                    continue
-                options.append((left_idx, right_idx))
-
-        for left_idx, right_idx in options:
-            score = 0.0
-            cand_left = centered[left_idx] if left_idx is not None else None
-            cand_right = centered[right_idx] if right_idx is not None else None
-
-            if cand_left is None:
-                score += missing_penalty
-            else:
-                score += self._assignment_cost(self.left_track, cand_left)
-            if cand_right is None:
-                score += missing_penalty
-            else:
-                score += self._assignment_cost(self.right_track, cand_right)
-
-            if cand_left is not None and cand_right is not None and cand_left.center[0] > cand_right.center[0]:
-                score += cross_penalty
-
-            if score < best_score:
-                best_score = score
-                best_left = cand_left
-                best_right = cand_right
-
-        return best_left, best_right, "two_player_temporal_match"
+        best_left = max(left_pool, key=self._candidate_quality_score) if left_pool else None
+        best_right = max(right_pool, key=self._candidate_quality_score) if right_pool else None
+        return best_left, best_right, "two_player_hard_side_split"
 
     def _repair_missing_joints(
         self,
