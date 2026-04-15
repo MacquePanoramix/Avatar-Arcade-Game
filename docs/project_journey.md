@@ -1203,3 +1203,22 @@ Why it matters:
 Takeaway:
 
 - For live demos, stability benefits from treating raw JSON as a transient stream rather than an archive.
+
+## Final real-time prioritization pass: newest-frame-only mode
+
+What was observed:
+- Even after adding backlog skipping and processed-file cleanup, runtime behavior could still drift far behind live reality during longer runs.
+
+What was concluded:
+- For live gameplay and demos, trying to process stale intermediate frames is the wrong priority; freshness is more important than completeness.
+
+What changed:
+- Added an optional `--newest-frame-only` live mode that jumps directly to the newest stable unseen frame each poll.
+- Older unseen frames are now intentionally dropped in that mode instead of being processed later.
+- Latest per-frame JSON output was made lighter by writing compact JSON formatting.
+
+Why it matters:
+- The runtime now behaves more like a real-time stream and less like a delayed recorder when configured for live/demo operation.
+
+Takeaway:
+- For demos and gameplay, “current” is more valuable than “complete”.
