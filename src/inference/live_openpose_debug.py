@@ -41,7 +41,6 @@ from src.preprocessing.temporal_resampling import (
     resample_sequence_fixed_length,
     source_window_frames_for_target_span,
 )
-from src.utils.paths import load_paths_config, resolve_path
 
 try:
     import cv2
@@ -81,7 +80,7 @@ def parse_args() -> argparse.Namespace:
         "--log-csv",
         type=str,
         default="",
-        help="Optional CSV log path. If omitted, creates logs/inference/live_debug_<utc>.csv.",
+        help="Optional CSV log path. Disabled unless explicitly provided.",
     )
     parser.add_argument(
         "--poll-interval",
@@ -282,6 +281,14 @@ def parse_args() -> argparse.Namespace:
         help="Require motion_active for non-idle ACCEPT decisions (default: enabled).",
     )
     parser.add_argument(
+        "--emit-on-accept",
+        action="store_true",
+        help=(
+            "Use ACCEPT-stage non-idle decisions for gameplay-facing emission output "
+            "instead of waiting for TRIGGER-stage output (diagnostic final_action_* remains unchanged)."
+        ),
+    )
+    parser.add_argument(
         "--output-latest-json",
         type=str,
         default="",
@@ -334,14 +341,6 @@ def load_label_map(path: Path) -> dict[int, str]:
         return {int(v): str(k) for k, v in label_to_id.items()}
 
     raise ValueError(f"Could not parse label mapping from {path}")
-
-
-def default_log_path() -> Path:
-    paths_cfg = load_paths_config()
-    logs_root = resolve_path(paths_cfg.get("inference_logs_dir", "logs/inference"))
-    logs_root.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return logs_root / f"live_debug_{timestamp}.csv"
 
 
 def summary_path_from_csv(csv_path: Path) -> Path:
@@ -729,6 +728,21 @@ def build_safe_player_payload(*, tracked: bool, person_index: int | None) -> dic
     }
 
 
+def resolve_gameplay_action(
+    *,
+    decision_status: str,
+    decision_label: str,
+    final_action_status: str,
+    final_action_label: str,
+    emit_on_accept: bool,
+) -> tuple[str, str]:
+    if emit_on_accept and decision_status == "ACCEPT" and decision_label not in {"", "idle", "NO_ACTION"}:
+        return "ACCEPT", decision_label
+    if final_action_status == "TRIGGER" and final_action_label not in {"", "idle", "NO_ACTION"}:
+        return "TRIGGER", final_action_label
+    return "NO_ACTION", "idle"
+
+
 @dataclass
 class PlayerRuntimeState:
     rolling: deque[np.ndarray]
@@ -813,7 +827,7 @@ def main() -> None:
     json_dir = Path(args.json_dir).expanduser().resolve()
     model_path = Path(args.model_path).expanduser().resolve()
     label_map_path = Path(args.label_map).expanduser().resolve()
-    log_csv_path = Path(args.log_csv).expanduser().resolve() if args.log_csv else default_log_path()
+    log_csv_path = Path(args.log_csv).expanduser().resolve() if args.log_csv else None
 
     if not json_dir.exists() or not json_dir.is_dir():
         raise FileNotFoundError(f"JSON directory not found or not a directory: {json_dir}")
@@ -877,20 +891,27 @@ def main() -> None:
             ),
         }
     seen_files: set[str] = set()
+    seen_files_queue: deque[str] = deque()
+    max_seen_files = max(2048, rolling_capacity * 32)
     print_every_n = max(1, int(args.print_every_n))
-    summary_path = summary_path_from_csv(log_csv_path)
+    summary_path = summary_path_from_csv(log_csv_path) if log_csv_path is not None else None
     latest_json_path = Path(args.output_latest_json).expanduser().resolve() if args.output_latest_json else None
     jsonl_path = Path(args.output_jsonl).expanduser().resolve() if args.output_jsonl else None
+    jsonl_file = None
     if latest_json_path is not None:
         latest_json_path.parent.mkdir(parents=True, exist_ok=True)
     if jsonl_path is not None:
         jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        jsonl_file = jsonl_path.open("a", encoding="utf-8")
 
-    log_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    csv_file = log_csv_path.open("w", encoding="utf-8", newline="")
-    writer = csv.DictWriter(
-        csv_file,
-        fieldnames=[
+    csv_file = None
+    writer = None
+    if log_csv_path is not None:
+        log_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        csv_file = log_csv_path.open("w", encoding="utf-8", newline="")
+        writer = csv.DictWriter(
+            csv_file,
+            fieldnames=[
             "timestamp_utc",
             "frame_file",
             "player_side",
@@ -952,16 +973,24 @@ def main() -> None:
             "active_span_end_index",
             "active_span_length_frames",
             "classifier_input_source_mode",
-        ],
-    )
-    writer.writeheader()
+            ],
+        )
+        writer.writeheader()
+
+    def write_csv_row(row: dict[str, Any]) -> None:
+        if writer is not None:
+            writer.writerow(row)
+
+    def flush_csv() -> None:
+        if csv_file is not None:
+            csv_file.flush()
 
     print("=== Live OpenPose Debug Classifier ===")
     print(f"JSON dir: {json_dir}")
     print(f"Model: {model_path}")
     print(f"Label map: {label_map_path}")
-    print(f"CSV log: {log_csv_path}")
-    print(f"Summary: {summary_path}")
+    print(f"CSV log: {log_csv_path if log_csv_path is not None else '(disabled)'}")
+    print(f"Summary: {summary_path if summary_path is not None else '(disabled)'}")
     print(f"Latest JSON output: {latest_json_path if latest_json_path is not None else '(disabled)'}")
     print(f"JSONL output: {jsonl_path if jsonl_path is not None else '(disabled)'}")
     print(f"Tracking mode: {args.tracking_mode}")
@@ -986,6 +1015,7 @@ def main() -> None:
         "Trigger filtering: "
         f"streak>={args.trigger_streak} non-idle ACCEPT frames, cooldown={args.trigger_cooldown_frames} frames"
     )
+    print(f"Emit on ACCEPT (gameplay-facing output): {'ON' if args.emit_on_accept else 'OFF'}")
     print(
         "Trigger hold lock release: "
         f"{args.release_idle_frames} consecutive release frames "
@@ -1059,7 +1089,12 @@ def main() -> None:
                 print(f"skipping stale backlog: dropped {dropped_count} frames", flush=True)
             for frame_path in new_paths:
                 # Mark seen first to avoid repeatedly trying a truncated file forever.
-                seen_files.add(frame_path.name)
+                seen_name = frame_path.name
+                seen_files.add(seen_name)
+                seen_files_queue.append(seen_name)
+                while len(seen_files_queue) > max_seen_files:
+                    old_seen = seen_files_queue.popleft()
+                    seen_files.discard(old_seen)
 
                 try:
                     frame_result = preprocessor.process_json_path(frame_path)
@@ -1164,7 +1199,7 @@ def main() -> None:
                                 "classifier_input_source_mode": "untracked",
                                 "active_span_length_frames": 0,
                             }
-                            writer.writerow(
+                            write_csv_row(
                                 {
                                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                                     "frame_file": frame_path.name,
@@ -1266,7 +1301,7 @@ def main() -> None:
                                 "classifier_input_source_mode": "warmup",
                                 "active_span_length_frames": 0,
                             }
-                            writer.writerow(
+                            write_csv_row(
                                 {
                                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                                     "frame_file": frame_path.name,
@@ -1454,7 +1489,7 @@ def main() -> None:
                             "classifier_input_source_mode": classifier_input_source_mode,
                             "active_span_length_frames": int(active_meta["active_span_length_frames"]),
                         }
-                        writer.writerow(
+                        write_csv_row(
                             {
                                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                                 "frame_file": frame_path.name,
@@ -1520,20 +1555,24 @@ def main() -> None:
                             }
                         )
 
-                    csv_file.flush()
+                    flush_csv()
                     if effective_overlay_mode in {"terminal", "both"}:
                         left_payload = players_payload.get("left", build_safe_player_payload(tracked=False, person_index=None))
                         right_payload = players_payload.get("right", build_safe_player_payload(tracked=False, person_index=None))
-                        print(
-                            f"frame={frame_path.name} | L[{left_payload['person_index']}] tracked={int(left_payload['tracked'])} "
-                            f"raw={left_payload['raw_label']} smooth={left_payload['smoothed_label']} "
-                            f"decision={left_payload['decision_status']}:{left_payload['decision_label']} "
-                            f"trigger={left_payload['final_action_status']}:{left_payload['final_action_label'] or '-'} || "
-                            f"R[{right_payload['person_index']}] tracked={int(right_payload['tracked'])} "
-                            f"raw={right_payload['raw_label']} smooth={right_payload['smoothed_label']} "
-                            f"decision={right_payload['decision_status']}:{right_payload['decision_label']} "
-                            f"trigger={right_payload['final_action_status']}:{right_payload['final_action_label'] or '-'}"
+                        two_player_inference_frames = (
+                            player_states["left"].inference_frames + player_states["right"].inference_frames
                         )
+                        if two_player_inference_frames % print_every_n == 0:
+                            print(
+                                f"frame={frame_path.name} | L[{left_payload['person_index']}] tracked={int(left_payload['tracked'])} "
+                                f"raw={left_payload['raw_label']} smooth={left_payload['smoothed_label']} "
+                                f"decision={left_payload['decision_status']}:{left_payload['decision_label']} "
+                                f"trigger={left_payload['final_action_status']}:{left_payload['final_action_label'] or '-'} || "
+                                f"R[{right_payload['person_index']}] tracked={int(right_payload['tracked'])} "
+                                f"raw={right_payload['raw_label']} smooth={right_payload['smoothed_label']} "
+                                f"decision={right_payload['decision_status']}:{right_payload['decision_label']} "
+                                f"trigger={right_payload['final_action_status']}:{right_payload['final_action_label'] or '-'}"
+                            )
                     if effective_overlay_mode in {"window", "both"}:
                         draw_two_player_window_overlay(
                             frame_file=frame_path.name,
@@ -1553,14 +1592,26 @@ def main() -> None:
                     # This sends: LeftLabel,LeftStatus,RightLabel,RightStatus
                     players = output_payload["players"]
 
-                    p1_label = players['left']['final_action_label'] if players['left']['tracked'] else "idle"
-                    p1_label = p1_label if p1_label else "idle" # 防止空字串
-                    p1_trigger = 1 if players['left']['final_action_status'] == "TRIGGER" else 0
+                    left_status, left_label = resolve_gameplay_action(
+                        decision_status=str(players["left"]["decision_status"]),
+                        decision_label=str(players["left"]["decision_label"]),
+                        final_action_status=str(players["left"]["final_action_status"]),
+                        final_action_label=str(players["left"]["final_action_label"]),
+                        emit_on_accept=bool(args.emit_on_accept),
+                    )
+                    p1_label = left_label if players["left"]["tracked"] else "idle"
+                    p1_trigger = 1 if left_status in {"TRIGGER", "ACCEPT"} else 0
 
                     # 抓取右邊玩家狀態
-                    p2_label = players['right']['final_action_label'] if players['right']['tracked'] else "idle"
-                    p2_label = p2_label if p2_label else "idle" # 防止空字串
-                    p2_trigger = 1 if players['right']['final_action_status'] == "TRIGGER" else 0
+                    right_status, right_label = resolve_gameplay_action(
+                        decision_status=str(players["right"]["decision_status"]),
+                        decision_label=str(players["right"]["decision_label"]),
+                        final_action_status=str(players["right"]["final_action_status"]),
+                        final_action_label=str(players["right"]["final_action_label"]),
+                        emit_on_accept=bool(args.emit_on_accept),
+                    )
+                    p2_label = right_label if players["right"]["tracked"] else "idle"
+                    p2_trigger = 1 if right_status in {"TRIGGER", "ACCEPT"} else 0
 
                     # time debugging
                     current_time_ms = int(time.time() * 1000)
@@ -1575,9 +1626,9 @@ def main() -> None:
 
                     if latest_json_path is not None:
                         latest_json_path.write_text(json.dumps(output_payload, indent=2), encoding="utf-8")
-                    if jsonl_path is not None:
-                        with jsonl_path.open("a", encoding="utf-8") as jsonl_file:
-                            jsonl_file.write(json.dumps(output_payload) + "\n")
+                    if jsonl_file is not None:
+                        jsonl_file.write(json.dumps(output_payload) + "\n")
+                        jsonl_file.flush()
                     continue
 
                 estimated_live_fps = shared_estimated_live_fps
@@ -1631,7 +1682,7 @@ def main() -> None:
                             f"sel={frame_result.selected_person_index} "
                             f"| fps={estimated_live_fps:.2f} motion={motion_score_smoothed:.3f}/{int(motion_active)}"
                         )
-                    writer.writerow(
+                    write_csv_row(
                         {
                             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                             "frame_file": frame_path.name,
@@ -1696,7 +1747,7 @@ def main() -> None:
                             "classifier_input_source_mode": "warmup",
                         }
                     )
-                    csv_file.flush()
+                    flush_csv()
                     continue
 
                 active_window, active_meta = build_live_active_span_window(
@@ -1931,7 +1982,7 @@ def main() -> None:
                         f"tracking_note={frame_result.tracking_note}"
                     )
 
-                writer.writerow(
+                write_csv_row(
                     {
                         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                         "frame_file": frame_path.name,
@@ -2019,10 +2070,10 @@ def main() -> None:
                     }
                     if latest_json_path is not None:
                         latest_json_path.write_text(json.dumps(output_payload, indent=2), encoding="utf-8")
-                    if jsonl_path is not None:
-                        with jsonl_path.open("a", encoding="utf-8") as jsonl_file:
-                            jsonl_file.write(json.dumps(output_payload) + "\n")
-                csv_file.flush()
+                    if jsonl_file is not None:
+                        jsonl_file.write(json.dumps(output_payload) + "\n")
+                        jsonl_file.flush()
+                flush_csv()
     except KeyboardInterrupt:
         print("\nStopped by user.")
     finally:
@@ -2030,7 +2081,10 @@ def main() -> None:
             cv2.destroyAllWindows()
         if effective_overlay_mode in {"terminal", "both"}:
             print()
-        csv_file.close()
+        if csv_file is not None:
+            csv_file.close()
+        if jsonl_file is not None:
+            jsonl_file.close()
         avg_missing_joints = (missing_joint_sum / total_frames) if total_frames > 0 else 0.0
         avg_estimated_live_fps = (fps_sum / fps_count) if fps_count > 0 else live_source_fps
         per_player_summary: dict[str, Any] = {}
@@ -2103,7 +2157,8 @@ def main() -> None:
             "active_span_context_after_sec": float(args.active_span_context_after_sec),
             "players": per_player_summary,
         }
-        summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
+        if summary_path is not None:
+            summary_path.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
 
         print("\n=== Run Summary ===")
         print(f"frames_total={total_frames} warmup={warmup_frames} inference={inference_frames}")
@@ -2131,8 +2186,10 @@ def main() -> None:
             print(f"smoothed_counts: {dict(smoothed_class_counts)}")
         if raw_smoothed_disagreements:
             print(f"raw->smoothed disagreements (top): {dict(raw_smoothed_disagreements.most_common(5))}")
-        print(f"Log saved: {log_csv_path}")
-        print(f"Summary saved: {summary_path}")
+        if log_csv_path is not None:
+            print(f"Log saved: {log_csv_path}")
+        if summary_path is not None:
+            print(f"Summary saved: {summary_path}")
 
 
 if __name__ == "__main__":
