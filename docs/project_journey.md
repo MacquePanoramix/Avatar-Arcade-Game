@@ -1164,3 +1164,19 @@ Why it matters:
 Takeaway:
 
 - For live game use, responsiveness and recency are more important than processing every historical frame.
+
+## Final demo-output simplification + runtime cleanup
+
+What we observed:
+- The ACCEPT stage was already strong enough for gameplay/demo use, even before strict TRIGGER confirmation.
+- Long runs could start responsive and later feel delayed or frozen.
+
+What changed:
+- Added optional `--emit-on-accept` mode so gameplay-facing emission can immediately use non-idle ACCEPT decisions, while keeping `final_action_status` / `final_action_label` intact for diagnostics.
+- Tightened runtime behavior to reduce long-run lag risk by bounding seen-frame tracking memory and limiting ongoing output file work to explicitly enabled outputs.
+
+Why it matters:
+- The demo now feels more responsive while staying more stable over longer sessions.
+
+Takeaway:
+- For presentation/demo use, immediate usable output and frame freshness matter more than always waiting for the stricter trigger layer in every case.
