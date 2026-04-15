@@ -1155,6 +1155,7 @@ What changed:
 
 - Optional demo-responsive settings make triggering easier.
 - Optional backlog skipping keeps the system focused on the newest frames.
+- Added a lightweight terminal diagnostic when stale backlog is dropped: `skipping stale backlog: dropped X frames`.
 
 Why it matters:
 
