@@ -286,21 +286,50 @@ class RuntimePreprocessor:
     ) -> tuple[ParsedPersonCandidate | None, ParsedPersonCandidate | None, str]:
         if not candidates:
             return None, None, "no_people_detected"
+
         centered = [c for c in candidates if c.center is not None]
         if not centered:
             return None, None, "no_center_candidates"
-        split_x = self.side_split_x
-        if split_x is None:
-            min_x = min(float(c.center[0]) for c in centered)
-            max_x = max(float(c.center[0]) for c in centered)
-            split_x = 0.5 * (min_x + max_x)
 
-        left_pool = [c for c in centered if float(c.center[0]) < float(split_x)]
-        right_pool = [c for c in centered if float(c.center[0]) >= float(split_x)]
+        if len(centered) == 1:
+            only_candidate = centered[0]
+            left_exists = self.left_track.center is not None
+            right_exists = self.right_track.center is not None
 
-        best_left = max(left_pool, key=self._candidate_quality_score) if left_pool else None
-        best_right = max(right_pool, key=self._candidate_quality_score) if right_pool else None
-        return best_left, best_right, "two_player_hard_side_split"
+            if left_exists and not right_exists:
+                return only_candidate, None, "two_player_single_candidate_temporal_assignment"
+            if right_exists and not left_exists:
+                return None, only_candidate, "two_player_single_candidate_temporal_assignment"
+            if left_exists and right_exists:
+                left_cost = self._assignment_cost(self.left_track, only_candidate)
+                right_cost = self._assignment_cost(self.right_track, only_candidate)
+                if left_cost <= right_cost:
+                    return only_candidate, None, "two_player_single_candidate_temporal_assignment"
+                return None, only_candidate, "two_player_single_candidate_temporal_assignment"
+
+            # No history yet: keep first observed candidate on LEFT by default.
+            return only_candidate, None, "two_player_single_candidate_temporal_assignment"
+
+        sorted_by_x = sorted(centered, key=lambda c: float(c.center[0]))
+        left_candidate = sorted_by_x[0]
+        right_candidate = sorted_by_x[-1]
+        tracking_note = "two_player_leftmost_rightmost"
+
+        both_tracks_exist = self.left_track.center is not None and self.right_track.center is not None
+        if both_tracks_exist and left_candidate is not right_candidate:
+            keep_cost = self._assignment_cost(self.left_track, left_candidate) + self._assignment_cost(
+                self.right_track, right_candidate
+            )
+            swap_cost = self._assignment_cost(self.left_track, right_candidate) + self._assignment_cost(
+                self.right_track, left_candidate
+            )
+
+            swap_margin = 0.15
+            if swap_cost + swap_margin < keep_cost:
+                left_candidate, right_candidate = right_candidate, left_candidate
+                tracking_note = "two_player_leftmost_rightmost_temporal_refined"
+
+        return left_candidate, right_candidate, tracking_note
 
     def _repair_missing_joints(
         self,

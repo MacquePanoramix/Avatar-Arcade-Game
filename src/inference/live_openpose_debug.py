@@ -112,8 +112,8 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help=(
-            "Optional literal vertical split line (x pixel) used only in "
-            "two_player_left_right mode. Left uses x < split; right uses x >= split."
+            "Deprecated compatibility flag for two_player_left_right mode. "
+            "Runtime side assignment now uses leftmost/rightmost detected ordering."
         ),
     )
     parser.add_argument(
