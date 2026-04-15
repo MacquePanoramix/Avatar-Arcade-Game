@@ -1180,3 +1180,26 @@ Why it matters:
 
 Takeaway:
 - For presentation/demo use, immediate usable output and frame freshness matter more than always waiting for the stricter trigger layer in every case.
+
+## Final live stability safeguard: processed JSON cleanup
+
+What was observed:
+
+- Long live runs could still degrade even after backlog skipping and runtime cleanup.
+
+What was concluded:
+
+- The ever-growing OpenPose JSON folder was still a likely long-run performance burden.
+
+What changed:
+
+- Added optional processed-frame cleanup so already-consumed JSON files can be removed during live runtime (`--cleanup-processed-json`).
+- Added optional keep-last safety tail (`--keep-last-json N`) so a small recent set of processed JSON files remains available for debugging.
+
+Why it matters:
+
+- The live loop stays focused on fresh data instead of carrying an ever-growing file-history burden.
+
+Takeaway:
+
+- For live demos, stability benefits from treating raw JSON as a transient stream rather than an archive.
