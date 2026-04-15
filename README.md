@@ -115,12 +115,14 @@ For quick local startup on one specific Windows machine, use these BAT files und
 - `run_two_player_live_demo.bat`: two-player left/right split tuned for a 640px-wide camera with split at `x=320`.
 - `run_two_player_live_demo_left_bias.bat`: fallback two-player split with a left-biased divider at `x=380` if left-player tracking is unreliable.
 
-These launchers are **machine-specific** and currently hardcode local paths for:
+These launchers are **machine-specific** and currently hardcode these local Windows paths:
 
-- repo root
-- OpenPose install
-- OpenPose model folder
-- best checkpoint model path
+- `REPO_DIR=D:\Documentos\Python Projects\Avatar-Arcade-Game`
+- `OPENPOSE_DIR=D:\Programs\OpenPose\openpose`
+- `OPENPOSE_MODEL_DIR=D:\Programs\OpenPose\openpose\models`
+- `MODEL_PATH=D:\Documentos\Python Projects\Avatar-Arcade-Game\models\checkpoints\best_mlp.keras`
+
+If two-player tracking misses the left player, use `run_two_player_live_demo_left_bias.bat` as the fallback launcher.
 
 Each launcher run creates timestamped outputs:
 
